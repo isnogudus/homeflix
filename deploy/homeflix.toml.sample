@@ -1,0 +1,15 @@
+# homeflix configuration. Copy to /usr/local/etc/homeflix.toml.
+# Unknown keys are rejected at startup, so typos do not go unnoticed.
+
+# Name shown to clients. Defaults to the host name.
+#server_name = "homeflix"
+
+# HTTP listen address. 8096 is the Jellyfin default that clients try first.
+#listen = ":8096"
+
+# Database and caches. A relative path is resolved against the directory of
+# this file.
+#data_dir = "/var/db/homeflix"
+
+# debug logs every request; info, warn and error are quieter.
+#log_level = "info"
