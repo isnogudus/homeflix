@@ -5,7 +5,7 @@
 # Needs ffmpeg and ffprobe in PATH.
 #
 # Usage: scripts/smoke-test.sh <path-to-homeflix-binary> [port]
-# On the development host: ssh claude 'sh -s -- homeflix/bin/homeflix' < scripts/smoke-test.sh
+# On the development host: ssh devhost 'sh -s -- homeflix/bin/homeflix' < scripts/smoke-test.sh
 set -eu
 
 bin=$1

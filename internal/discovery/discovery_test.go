@@ -16,7 +16,7 @@ func testResponder() *Responder {
 			return []net.Addr{
 				&net.IPNet{IP: net.ParseIP("127.0.0.1"), Mask: net.CIDRMask(8, 32)},
 				&net.IPNet{IP: net.ParseIP("10.0.0.5"), Mask: net.CIDRMask(24, 32)},
-				&net.IPNet{IP: net.ParseIP("192.168.21.15"), Mask: net.CIDRMask(24, 32)},
+				&net.IPNet{IP: net.ParseIP("192.168.1.10"), Mask: net.CIDRMask(24, 32)},
 			}, nil
 		},
 	}
@@ -27,11 +27,11 @@ func TestAnswer(t *testing.T) {
 	for _, tc := range []struct {
 		msg, from, address string
 	}{
-		{"who is JellyfinServer?", "192.168.21.97", "http://192.168.21.15:8096"},
+		{"who is JellyfinServer?", "192.168.1.20", "http://192.168.1.10:8096"},
 		{"Who is EmbyServer?\x00", "10.0.0.9", "http://10.0.0.5:8096"},
 		{"who is JellyfinServer?", "172.16.1.1", "http://10.0.0.5:8096"},
 		{"who is JellyfinServer?", "203.0.113.7", ""}, // not the local network
-		{"hello", "192.168.21.97", ""},
+		{"hello", "192.168.1.20", ""},
 	} {
 		b, ok := r.answer(tc.msg, netip.MustParseAddr(tc.from))
 		if tc.address == "" {
@@ -45,7 +45,7 @@ func TestAnswer(t *testing.T) {
 			t.Errorf("%q from %s: %s, %v", tc.msg, tc.from, b, ok)
 		}
 	}
-	r.Host = "192.168.21.15"
+	r.Host = "192.168.1.10"
 	if b, _ := r.answer("who is JellyfinServer?", netip.MustParseAddr("10.0.0.9")); !json.Valid(b) || string(b) == "" {
 		t.Errorf("fixed host: %s", b)
 	}

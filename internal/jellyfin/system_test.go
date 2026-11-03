@@ -36,7 +36,7 @@ func newTestServer(t *testing.T, logBuf *bytes.Buffer) *Server {
 func get(t *testing.T, h http.Handler, path string, header http.Header) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, path, nil)
-	req.Host = "192.168.21.15:8096"
+	req.Host = "192.168.1.10:8096"
 	for k, v := range header {
 		req.Header[k] = v
 	}
@@ -60,7 +60,7 @@ func TestPublicSystemInfo(t *testing.T) {
 			t.Fatal(err)
 		}
 		want := map[string]any{
-			"LocalAddress":           "http://192.168.21.15:8096",
+			"LocalAddress":           "http://192.168.1.10:8096",
 			"ServerName":             "testhost",
 			"Version":                CompatVersion,
 			"ProductName":            "Jellyfin Server",

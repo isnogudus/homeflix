@@ -85,10 +85,10 @@ underscore, and the rest of the word is kept;
 .Li ${ Ns Ar name Ns }
 delimits the name where a letter, digit or underscore follows:
 .Bd -literal -offset indent
-movies = "/export/movies"
+movies = "/media/movies"
 library "Filme" {
-	path $movies/plex
-	path ${movies}_archiv
+	path $movies/recent
+	path ${movies}_archive
 }
 .Ed
 .Pp
@@ -279,7 +279,7 @@ default configuration file
 .Sh EXAMPLES
 .Bd -literal -offset indent
 server name "Kino"
-listen on 192.168.21.15
+listen on 192.168.1.10
 language de
 sort articles { the a an der die das }
 
@@ -287,8 +287,8 @@ ffprobe "/usr/local/bin/ffprobe"
 ffmpeg "/usr/local/bin/ffmpeg"
 
 library "Filme" {
-	path "/export/movies/plex"
-	path "/export/movies/archiv"
+	path "/media/movies/recent"
+	path "/media/movies/archive"
 }
 .Ed
 .Pp

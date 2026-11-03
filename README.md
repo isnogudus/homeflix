@@ -70,8 +70,8 @@ listen on * port 8096
 language de
 
 library "Filme" {
-	path "/export/movies/plex"
-	path "/export/movies/archiv"
+	path "/media/movies/recent"
+	path "/media/movies/archive"
 }
 ```
 
@@ -177,14 +177,17 @@ any more are removed after each scan.
 
 ## Development host
 
-`scripts/deploy-dev.sh [host]` cross-compiles, copies the binary to
-`~/homeflix` on the host over SSH and restarts it as the login user, without
-root. The default host is `claude` (override with `HOMEFLIX_DEV_HOST`).
+`scripts/deploy-dev.sh host` (or `HOMEFLIX_DEV_HOST=host`) cross-compiles,
+copies the binary to `~/homeflix` on the host over SSH and restarts it as
+the login user, without root. On the first deploy it also copies
+`deploy/dev.conf` there as `homeflix.conf`; adjust the library paths in it,
+later deploys leave the host's copy alone.
 
 `scripts/smoke-test.sh <binary>` starts a throwaway instance on 127.0.0.1
-with a generated test user, runs the client login flow with curl and
-removes everything afterwards:
+with a generated test user and a generated two-second movie, runs the client
+flow with curl, including subtitle extraction and the WebSocket handshake,
+and removes everything afterwards:
 
 ```sh
-ssh claude 'sh -s -- homeflix/bin/homeflix' < scripts/smoke-test.sh
+ssh devhost 'sh -s -- homeflix/bin/homeflix' < scripts/smoke-test.sh
 ```

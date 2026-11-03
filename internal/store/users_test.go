@@ -46,7 +46,7 @@ func newToken(hash, userID, device string) Token {
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	return Token{
 		Hash: hash, SessionID: "s-" + hash, UserID: userID, DeviceID: device, DeviceName: "iMac",
-		Client: "Moonfin", ClientVersion: "3.0.0", RemoteAddr: "192.168.21.97", CreatedAt: now, LastSeenAt: now,
+		Client: "Moonfin", ClientVersion: "3.0.0", RemoteAddr: "192.168.1.20", CreatedAt: now, LastSeenAt: now,
 	}
 }
 

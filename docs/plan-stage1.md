@@ -27,12 +27,12 @@ dashboard API, and any own web frontend.
 
 ## 2. Facts this plan rests on
 
-Library (`/export/movies`, read-only inside the jail):
+Library (`/media/movies`, read-only inside the jail):
 
 | Folder   | Entries | Formats                              | IMDb ID in name |
 |----------|---------|--------------------------------------|-----------------|
-| `plex`   | 1463    | 1379 mp4, 45 avi, 23 mkv, 2 m4v, ... | 24              |
-| `archiv` | 271     | 268 mkv                              | all             |
+| `recent` | 1463    | 1379 mp4, 45 avi, 23 mkv, 2 m4v, ... | 24              |
+| `archive`| 271     | 268 mkv                              | all             |
 
 - Naming scheme: `Title (Year) [imdbid-tt1234567].ext`. Some names are
   irregular, for example `#9 (2009).avi [imdbid-tt0472033].mp4`.
@@ -64,9 +64,9 @@ Client (Moonfin, source `Moonfin-Client/Moonfin-Core`,
   `Studios`, `SortName`, `Chapters`, `Path`, `MediaStreams`, `DateCreated`,
   `ProviderIds`, `MediaSources`.
 
-Environment: jail `claude` (FreeBSD 15.1, amd64, 12 cores, 32 GB), ffmpeg and
-ffprobe from pkg. Go 1.27 is available on the development Mac; the jail does
-not need a Go toolchain because the binary is cross-compiled.
+Environment: the development jail (FreeBSD 15.1, amd64, 12 cores, 32 GB),
+ffmpeg and ffprobe from pkg. Go 1.27 is available on the development Mac;
+the jail does not need a Go toolchain because the binary is cross-compiled.
 
 ## 3. Alternatives checked
 

@@ -9,10 +9,10 @@
 #   homeflix.log    server log
 #   homeflix.pid    pid of the running server
 #
-# Usage: scripts/deploy-dev.sh [ssh-host]   (default: $HOMEFLIX_DEV_HOST or "claude")
+# Usage: scripts/deploy-dev.sh [ssh-host]   (default: $HOMEFLIX_DEV_HOST)
 set -eu
 
-host=${1:-${HOMEFLIX_DEV_HOST:-claude}}
+host=${1:-${HOMEFLIX_DEV_HOST:?usage: scripts/deploy-dev.sh ssh-host, or set HOMEFLIX_DEV_HOST}}
 root=$(cd "$(dirname "$0")/.." && pwd)
 bin="$root/build/homeflix-freebsd-amd64"
 version=$(git -C "$root" describe --always --dirty 2>/dev/null || echo dev)

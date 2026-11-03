@@ -35,12 +35,12 @@ func TestDefaults(t *testing.T) {
 func TestFullConfiguration(t *testing.T) {
 	cfg, err := parseString(t, `
 # Example from homeflix.conf(5).
-plex = "/export/movies/plex"
-movies = "/export/movies"
+recent = "/media/movies/recent"
+movies = "/media/movies"
 tools = "/usr/local/bin"
 
 server name "homeflix dev"
-listen on 192.168.21.15 port 18096
+listen on 192.168.1.10 port 18096
 data directory data
 log level debug
 language de
@@ -52,8 +52,8 @@ scan interval 1h30m
 sort articles { The, der die das }
 
 library "Filme" {
-	path $plex
-	path { $movies/archiv, "/srv/neue filme" }
+	path $recent
+	path { $movies/archive, "/srv/neue filme" }
 }
 library Doku { path ${movies}_doku }
 `)
@@ -62,7 +62,7 @@ library Doku { path ${movies}_doku }
 	}
 	want := Config{
 		ServerName:      "homeflix dev",
-		Listen:          "192.168.21.15:18096",
+		Listen:          "192.168.1.10:18096",
 		DataDir:         "/etc/data",
 		LogLevel:        "debug",
 		FFprobe:         "/usr/local/bin/ffprobe",
@@ -74,8 +74,8 @@ library Doku { path ${movies}_doku }
 		DisplayLanguage: "de",
 		Discovery:       true,
 		Libraries: []Library{
-			{Name: "Filme", Paths: []string{"/export/movies/plex", "/export/movies/archiv", "/srv/neue filme"}},
-			{Name: "Doku", Paths: []string{"/export/movies_doku"}},
+			{Name: "Filme", Paths: []string{"/media/movies/recent", "/media/movies/archive", "/srv/neue filme"}},
+			{Name: "Doku", Paths: []string{"/media/movies_doku"}},
 		},
 	}
 	if !reflect.DeepEqual(cfg, want) {
@@ -163,14 +163,14 @@ server name y
 
 func TestLoadIncludesAndWarnsAboutUnusedMacros(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "libraries.conf"), []byte("library Filme { path /export/movies }\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "libraries.conf"), []byte("library Filme { path /media/movies }\n"), 0o644)
 	main := filepath.Join(dir, "homeflix.conf")
 	os.WriteFile(main, []byte("unused = 1\ninclude \"libraries.conf\"\ndata directory \"db\"\n"), 0o644)
 	cfg, err := Load(main)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.Libraries) != 1 || cfg.Libraries[0].Paths[0] != "/export/movies" {
+	if len(cfg.Libraries) != 1 || cfg.Libraries[0].Paths[0] != "/media/movies" {
 		t.Errorf("included library: %+v", cfg.Libraries)
 	}
 	if cfg.DataDir != filepath.Join(dir, "db") {

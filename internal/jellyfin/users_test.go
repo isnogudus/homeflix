@@ -23,7 +23,7 @@ type apiClient struct {
 func (c *apiClient) do(method, path, body string, header http.Header) *httptest.ResponseRecorder {
 	c.t.Helper()
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
-	req.RemoteAddr = "192.168.21.97:50000"
+	req.RemoteAddr = "192.168.1.20:50000"
 	if body != "" {
 		req.Header.Set("Content-Type", "application/json")
 	}
