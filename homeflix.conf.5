@@ -77,9 +77,24 @@ words = "{ the a an der die das }"
 sort articles $words
 .Ed
 .Pp
-A macro stands for whole words; it is not expanded inside a word, so
-.Li $movies/plex
-does not work.
+A reference may also start or sit inside an unquoted word.
+As in
+.Xr pf.conf 5 ,
+the name ends at the first character that is not a letter, digit or
+underscore, and the rest of the word is kept;
+.Li ${ Ns Ar name Ns }
+delimits the name where a letter, digit or underscore follows:
+.Bd -literal -offset indent
+movies = "/export/movies"
+library "Filme" {
+	path $movies/plex
+	path ${movies}_archiv
+}
+.Ed
+.Pp
+Such a reference must stand for a single word, not a list.
+Quoted strings are never expanded, so a path with spaces has to be given
+in full in the macro or in the statement.
 Macros that are defined but never used are reported as warnings.
 .Pp
 Further files may be included with

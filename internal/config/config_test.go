@@ -36,13 +36,15 @@ func TestFullConfiguration(t *testing.T) {
 	cfg, err := parseString(t, `
 # Example from homeflix.conf(5).
 plex = "/export/movies/plex"
+movies = "/export/movies"
+tools = "/usr/local/bin"
 
 server name "homeflix dev"
 listen on 192.168.21.15 port 18096
 data directory data
 log level debug
 language de
-ffprobe /usr/local/bin/ffprobe
+ffprobe $tools/ffprobe
 ffmpeg "/usr/local/bin/ffmpeg"
 probe workers 8
 image workers 3
@@ -51,9 +53,9 @@ sort articles { The, der die das }
 
 library "Filme" {
 	path $plex
-	path { "/export/movies/archiv", "/srv/neue filme" }
+	path { $movies/archiv, "/srv/neue filme" }
 }
-library Doku { path /export/doku }
+library Doku { path ${movies}_doku }
 `)
 	if err != nil {
 		t.Fatal(err)
@@ -72,7 +74,7 @@ library Doku { path /export/doku }
 		DisplayLanguage: "de",
 		Libraries: []Library{
 			{Name: "Filme", Paths: []string{"/export/movies/plex", "/export/movies/archiv", "/srv/neue filme"}},
-			{Name: "Doku", Paths: []string{"/export/doku"}},
+			{Name: "Doku", Paths: []string{"/export/movies_doku"}},
 		},
 	}
 	if !reflect.DeepEqual(cfg, want) {

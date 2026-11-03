@@ -24,6 +24,6 @@
 # "behind the scenes" or "trailers". Movies that disappear are kept for
 # 30 days, so renames and remounts keep watch state.
 #library "Movies" {
-#	path $movies
+#	path $movies/films
 #	path "/media/more movies"
 #}

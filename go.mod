@@ -3,7 +3,7 @@ module homeflix
 go 1.26.0
 
 require (
-	github.com/isnogudus/obsdconf v0.3.0
+	github.com/isnogudus/obsdconf v0.4.0
 	golang.org/x/crypto v0.58.0
 	golang.org/x/image v0.47.0
 	golang.org/x/term v0.47.0
