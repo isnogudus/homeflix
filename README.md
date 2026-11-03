@@ -191,3 +191,7 @@ and removes everything afterwards:
 ```sh
 ssh devhost 'sh -s -- homeflix/bin/homeflix' < scripts/smoke-test.sh
 ```
+
+## License
+
+MIT, see [LICENSE](LICENSE).
