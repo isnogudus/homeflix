@@ -25,6 +25,20 @@ func (s *Server) registerLibrary(rt *Router) {
 	for _, p := range []string{"/Items/Latest", "/Users/{userId}/Items/Latest"} {
 		rt.HandleFunc(http.MethodGet, p, emptyList)
 	}
+	rt.HandleFunc(http.MethodPost, "/Library/Refresh", s.authed(s.refreshLibrary))
+}
+
+// refreshLibrary starts a scan of all libraries. Administrators only.
+func (s *Server) refreshLibrary(w http.ResponseWriter, r *http.Request, sess *Session) {
+	if !sess.User.IsAdmin {
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
+	if s.RequestScan != nil {
+		s.RequestScan()
+	}
+	s.Log.Info("library scan requested", "user", sess.User.Name, "client", sess.Token.Client)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) emptyQueryResult(w http.ResponseWriter, r *http.Request, sess *Session) {

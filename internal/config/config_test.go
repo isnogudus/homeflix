@@ -62,6 +62,45 @@ func TestLoadRejectsInvalidValues(t *testing.T) {
 	}
 }
 
+func TestLoadLibraries(t *testing.T) {
+	path := writeConfig(t, `
+scan_interval = "90m"
+sort_articles = ["the", "der"]
+
+[[library]]
+name = "Filme"
+paths = ["/export/movies/plex/", "/export/movies/archiv"]
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Libraries) != 1 || cfg.Libraries[0].Paths[0] != "/export/movies/plex" {
+		t.Errorf("libraries: %+v", cfg.Libraries)
+	}
+	if cfg.ScanInterval.Minutes() != 90 || len(cfg.SortArticles) != 2 {
+		t.Errorf("scan_interval %v, sort_articles %v", cfg.ScanInterval, cfg.SortArticles)
+	}
+}
+
+func TestLoadRejectsBadLibraries(t *testing.T) {
+	for name, content := range map[string]string{
+		"relative path": "[[library]]\nname = \"a\"\npaths = [\"movies\"]\n",
+		"no paths":      "[[library]]\nname = \"a\"\npaths = []\n",
+		"no name":       "[[library]]\npaths = [\"/m\"]\n",
+		"duplicate":     "[[library]]\nname = \"a\"\npaths = [\"/m\"]\n[[library]]\nname = \"A\"\npaths = [\"/n\"]\n",
+		"nested paths":  "[[library]]\nname = \"a\"\npaths = [\"/m\"]\n[[library]]\nname = \"b\"\npaths = [\"/m/x\"]\n",
+		"bad interval":  "scan_interval = \"often\"\n",
+		"zero workers":  "probe_workers = 0\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Load(writeConfig(t, content)); err == nil {
+				t.Error("want error, got nil")
+			}
+		})
+	}
+}
+
 func TestSlogLevel(t *testing.T) {
 	cfg := Default()
 	cfg.LogLevel = "debug"

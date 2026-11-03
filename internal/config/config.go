@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
@@ -25,6 +26,37 @@ type Config struct {
 	DataDir string `toml:"data_dir"`
 	// LogLevel is one of debug, info, warn, error.
 	LogLevel string `toml:"log_level"`
+
+	// FFprobe is the ffprobe binary, looked up in PATH unless absolute.
+	FFprobe string `toml:"ffprobe"`
+	// ProbeWorkers is the number of ffprobe processes run in parallel.
+	ProbeWorkers int `toml:"probe_workers"`
+	// ScanInterval is the time between automatic library scans; 0 turns
+	// them off. A scan also runs at startup.
+	ScanInterval Duration `toml:"scan_interval"`
+	// SortArticles are leading words ignored when sorting by name.
+	SortArticles []string `toml:"sort_articles"`
+
+	Libraries []Library `toml:"library"`
+}
+
+// Library is one movie library made of one or more directories.
+type Library struct {
+	Name  string   `toml:"name"`
+	Paths []string `toml:"paths"`
+}
+
+// Duration is a time.Duration written as a string such as "6h" or "90m".
+type Duration struct{ time.Duration }
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (d *Duration) UnmarshalText(b []byte) error {
+	v, err := time.ParseDuration(string(b))
+	if err != nil {
+		return err
+	}
+	d.Duration = v
+	return nil
 }
 
 // Default returns the configuration used for keys the file does not set.
@@ -34,10 +66,14 @@ func Default() Config {
 		name = "homeflix"
 	}
 	return Config{
-		ServerName: name,
-		Listen:     ":8096",
-		DataDir:    "/var/db/homeflix",
-		LogLevel:   "info",
+		ServerName:   name,
+		Listen:       ":8096",
+		DataDir:      "/var/db/homeflix",
+		LogLevel:     "info",
+		FFprobe:      "ffprobe",
+		ProbeWorkers: 4,
+		ScanInterval: Duration{6 * time.Hour},
+		SortArticles: []string{"the", "a", "an"},
 	}
 }
 
@@ -63,6 +99,11 @@ func Load(path string) (Config, error) {
 		}
 		cfg.DataDir = filepath.Join(filepath.Dir(abs), cfg.DataDir)
 	}
+	for i := range cfg.Libraries {
+		for j, p := range cfg.Libraries[i].Paths {
+			cfg.Libraries[i].Paths[j] = filepath.Clean(p)
+		}
+	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, fmt.Errorf("config %s: %w", path, err)
 	}
@@ -82,6 +123,40 @@ func (c Config) Validate() error {
 	}
 	if _, err := c.SlogLevel(); err != nil {
 		return err
+	}
+	if c.FFprobe == "" {
+		return errors.New("ffprobe must not be empty")
+	}
+	if c.ProbeWorkers < 1 || c.ProbeWorkers > 64 {
+		return fmt.Errorf("probe_workers %d: want 1 to 64", c.ProbeWorkers)
+	}
+	if c.ScanInterval.Duration < 0 {
+		return errors.New("scan_interval must not be negative")
+	}
+	names := map[string]bool{}
+	paths := map[string]string{}
+	for _, lib := range c.Libraries {
+		if strings.TrimSpace(lib.Name) == "" {
+			return errors.New("library: name must not be empty")
+		}
+		if names[strings.ToLower(lib.Name)] {
+			return fmt.Errorf("library %q: defined twice", lib.Name)
+		}
+		names[strings.ToLower(lib.Name)] = true
+		if len(lib.Paths) == 0 {
+			return fmt.Errorf("library %q: paths must not be empty", lib.Name)
+		}
+		for _, p := range lib.Paths {
+			if !filepath.IsAbs(p) {
+				return fmt.Errorf("library %q: path %q must be absolute", lib.Name, p)
+			}
+			for other, owner := range paths {
+				if p == other || strings.HasPrefix(p, other+"/") || strings.HasPrefix(other, p+"/") {
+					return fmt.Errorf("library %q: path %q overlaps %q of library %q", lib.Name, p, other, owner)
+				}
+			}
+			paths[p] = lib.Name
+		}
 	}
 	return nil
 }

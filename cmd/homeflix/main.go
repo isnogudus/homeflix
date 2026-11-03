@@ -11,13 +11,16 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"runtime"
+	"sync"
 	"syscall"
 	"time"
 
 	"homeflix/internal/config"
 	"homeflix/internal/jellyfin"
+	"homeflix/internal/library"
 	"homeflix/internal/store"
 )
 
@@ -39,6 +42,8 @@ func usage(w io.Writer) {
 
 Commands:
   serve     run the server
+  scan      scan the libraries once and probe new files
+  stats     summarise containers and codecs of the libraries
   user      manage users (add, passwd, delete, list)
   version   print the version
 
@@ -54,6 +59,10 @@ func run(args []string, cio cliIO) error {
 	switch args[0] {
 	case "serve":
 		return serve(args[1:], cio.stderr)
+	case "scan":
+		return scanCommand(args[1:], cio)
+	case "stats":
+		return statsCommand(args[1:], cio)
 	case "user":
 		return userCommand(args[1:], cio)
 	case "version":
@@ -95,12 +104,36 @@ func serve(args []string, stderr io.Writer) error {
 		return fmt.Errorf("server ID: %w", err)
 	}
 
+	if _, err := exec.LookPath(cfg.FFprobe); err != nil {
+		log.Warn("ffprobe not found; new files cannot be probed", "ffprobe", cfg.FFprobe, "err", err)
+	}
+	if len(cfg.Libraries) == 0 {
+		log.Warn("no libraries configured")
+	}
+	scanner := newScanner(cfg, db, log)
+	scanTrigger := make(chan struct{}, 1)
+	var scans sync.WaitGroup
+	scans.Add(1)
+	go func() {
+		defer scans.Done()
+		runScans(ctx, scanner, cfg.ScanInterval.Duration, scanTrigger, log)
+	}()
+	defer scans.Wait()
+	// Runs before the Wait above, so a failing listener also ends the scan.
+	defer stop()
+
 	api := &jellyfin.Server{
 		ServerID:         serverID,
 		ServerName:       cfg.ServerName,
 		Store:            db,
 		Log:              log,
 		FailedLoginDelay: time.Second,
+		RequestScan: func() {
+			select {
+			case scanTrigger <- struct{}{}:
+			default:
+			}
+		},
 	}
 	httpServer := &http.Server{
 		Handler:           api.Handler(),
@@ -136,4 +169,48 @@ func serve(args []string, stderr io.Writer) error {
 	}
 	log.Info("stopped")
 	return nil
+}
+
+// runScans scans at startup, then every interval (if positive) and
+// whenever trigger fires, until ctx is done.
+func runScans(ctx context.Context, sc *library.Scanner, interval time.Duration, trigger <-chan struct{}, log *slog.Logger) {
+	scan := func(reason string) {
+		log.Info("library scan started", "reason", reason)
+		rep, err := sc.Scan(ctx)
+		switch {
+		case ctx.Err() != nil:
+			log.Info("library scan interrupted")
+			return
+		case errors.Is(err, library.ErrScanRunning):
+			log.Info("library scan skipped: another scan is running")
+			return
+		case err != nil:
+			log.Error("library scan failed", "err", err)
+		}
+		for _, l := range rep.Libraries {
+			log.Info("library scanned", "library", l.Name, "movies", l.Movies, "added", l.Added,
+				"updated", l.Updated, "moved", l.Moved, "returned", l.Returned, "missing", l.Missing,
+				"files_added", l.FilesAdded, "files_changed", l.FilesChanged, "files_removed", l.FilesRemoved,
+				"unavailable", len(l.UnavailablePaths))
+		}
+		log.Info("library scan finished", "purged", rep.Purged, "probed", rep.Probed,
+			"probe_failures", rep.ProbeFailed, "took", rep.Took.Round(time.Millisecond))
+	}
+	scan("startup")
+	var tick <-chan time.Time
+	if interval > 0 {
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		tick = t.C
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick:
+			scan("interval")
+		case <-trigger:
+			scan("requested")
+		}
+	}
 }

@@ -3,3 +3,8 @@ server_name = "homeflix-dev"
 listen = ":8096"
 data_dir = "data"
 log_level = "debug"
+ffprobe = "/usr/local/bin/ffprobe"
+
+[[library]]
+name = "Filme"
+paths = ["/export/movies/plex", "/export/movies/archiv"]

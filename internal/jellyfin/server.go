@@ -29,6 +29,8 @@ type Server struct {
 	Log        *slog.Logger
 	// FailedLoginDelay slows down password guessing.
 	FailedLoginDelay time.Duration
+	// RequestScan asks for a library scan without waiting for it.
+	RequestScan func()
 
 	unknownMu   sync.Mutex
 	unknownSeen map[string]struct{}

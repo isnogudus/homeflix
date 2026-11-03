@@ -12,9 +12,9 @@ Principles:
   sources are opt-in.
 - One static binary, one SQLite database. No Docker, PostgreSQL or Redis.
 
-Status: milestone M1 of [the stage 1 plan](docs/plan-stage1.md). Clients can
-find the server and sign in; the home screen is empty until the library
-arrives in M2–M4.
+Status: milestone M2 of [the stage 1 plan](docs/plan-stage1.md). Clients can
+find the server and sign in; the libraries are scanned and probed, but the
+API shows them only from M3 on.
 
 ## Build
 
@@ -44,6 +44,30 @@ service homeflix start
 ```
 
 The account needs read access to the media directories.
+
+## Libraries
+
+Each `[[library]]` block in the configuration names one or more
+directories. A movie is
+
+- a single file: `Heat (1995) [imdbid-tt0113277].mkv`,
+- part files next to each other: `Intimacy (2001) cd1.avi`, `… cd2.avi`,
+- or a folder `Title (Year)` holding one or more versions (`… [HD].mp4`,
+  `… [SD] part1.mp4`, `… [SD] part2.mp4`) and extras folders such as
+  `behind the scenes`, `featurettes` or `trailers`.
+
+The year and an `[imdbid-tt…]` or `{imdb-tt…}` tag are read from the name.
+Scans run at startup, every `scan_interval` and on `POST /Library/Refresh`;
+only new or changed files are probed with ffprobe. Renamed and moved files
+keep their item (matched by size and modification time, or by IMDb ID); a
+movie that disappears is kept for 30 days, and a library directory that
+cannot be read leaves its movies untouched.
+
+```sh
+homeflix scan -config /usr/local/etc/homeflix.toml            # scan once
+homeflix scan -reprobe -config /usr/local/etc/homeflix.toml   # probe everything again
+homeflix stats -config /usr/local/etc/homeflix.toml           # containers, codecs, HDR, failures
+```
 
 ## Users
 

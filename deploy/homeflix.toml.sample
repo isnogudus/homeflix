@@ -13,3 +13,24 @@
 
 # debug logs every request; info, warn and error are quieter.
 #log_level = "info"
+
+# ffprobe binary, looked up in PATH unless absolute.
+#ffprobe = "ffprobe"
+
+# Number of ffprobe processes run in parallel while scanning.
+#probe_workers = 4
+
+# Time between automatic library scans ("0" turns them off). A scan also
+# runs at startup and when an administrator refreshes the library.
+#scan_interval = "6h"
+
+# Leading words ignored when sorting by name.
+#sort_articles = ["the", "a", "an"]
+
+# One block per library. A movie is a single file, a set of "part1",
+# "part2" files, or a folder named "Title (Year)" holding versions, parts
+# and extras folders such as "behind the scenes" or "trailers". Movies that
+# disappear are kept for 30 days, so renames and remounts keep watch state.
+#[[library]]
+#name = "Movies"
+#paths = ["/media/movies"]

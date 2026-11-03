@@ -261,6 +261,29 @@ func TestLogoutAndRelogin(t *testing.T) {
 	}
 }
 
+func TestLibraryRefresh(t *testing.T) {
+	s := newTestServer(t, nil)
+	requested := 0
+	s.RequestScan = func() { requested++ }
+	addUser(t, s, "admin", "a", true)
+	addUser(t, s, "anna", "b", false)
+	h := s.Handler()
+	asAnna := &apiClient{t: t, h: h}
+	login(t, asAnna, "anna", "b")
+	asAdmin := &apiClient{t: t, h: h}
+	login(t, asAdmin, "admin", "a")
+
+	if rec := asAnna.do("POST", "/Library/Refresh", "", nil); rec.Code != http.StatusForbidden {
+		t.Errorf("non-admin refresh: %d", rec.Code)
+	}
+	if rec := asAdmin.do("POST", "/Library/Refresh", "", nil); rec.Code != http.StatusNoContent {
+		t.Errorf("admin refresh: %d", rec.Code)
+	}
+	if requested != 1 {
+		t.Errorf("scan requested %d times, want 1", requested)
+	}
+}
+
 func TestHomeScreenIsEmpty(t *testing.T) {
 	s := newTestServer(t, nil)
 	anna := addUser(t, s, "anna", "pw", false)
