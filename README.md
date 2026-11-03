@@ -12,11 +12,13 @@ Principles:
   sources are opt-in.
 - One static binary, one SQLite database. No Docker, PostgreSQL or Redis.
 
-Status: milestone M5 of [the stage 1 plan](docs/plan-stage1.md). Clients can
-sign in, browse, search and play the movies directly, including alternate
-versions and movies split into parts; watch state, resume positions and
-favourites are kept per user. With a TMDB token, movies get titles,
-overviews, genres, cast, ratings and artwork.
+Status: milestone M6 of [the stage 1 plan](docs/plan-stage1.md). Clients
+find the server in the local network, sign in, browse, search and play the
+movies directly, including alternate versions and movies split into parts;
+watch state, resume positions and favourites are kept per user. With a TMDB
+token, movies get titles, overviews, genres, cast, ratings and artwork.
+[docs/api-coverage.md](docs/api-coverage.md) lists the Jellyfin endpoints
+homeflix answers.
 
 Playback is direct play only: the client receives the original file and
 decodes it. PlaybackInfo evaluates the client's device profile as Jellyfin
@@ -75,6 +77,11 @@ library "Filme" {
 
 `homeflix serve -n` checks the file and reports every error at once, with
 file name and line.
+
+Clients find the server by themselves: homeflix answers the discovery
+broadcasts Jellyfin clients send on UDP port 7359, from private network
+addresses only. `no discovery` turns that off; a server listening on a
+loopback address does not answer anyway.
 
 ## Libraries
 
@@ -149,13 +156,14 @@ and password instead of showing who has an account.
 
 ## Backup
 
-The data directory holds three things:
+The data directory holds:
 
 | Path | Content | Back up? |
 |---|---|---|
 | `homeflix.db` | users, sessions, watch state, library, metadata, manual matches | yes, with `homeflix backup` |
 | `metadata/` | artwork from TMDB | yes; fetching it again needs TMDB |
 | `images/` | stills and scaled images made from the videos | no, it is rebuilt on demand |
+| `subtitles/` | text subtitles extracted for clients that ask for them as files | no |
 
 The database must not be copied as a file while the server runs; use
 
@@ -164,8 +172,8 @@ homeflix backup /backup/homeflix.db -config /usr/local/etc/homeflix.conf
 ```
 
 which writes a consistent copy (SQLite `VACUUM INTO`) readable by its owner
-only, since it holds password hashes. Artwork no movie uses any more is
-removed after each scan.
+only, since it holds password hashes. Artwork and subtitles no movie uses
+any more are removed after each scan.
 
 ## Development host
 

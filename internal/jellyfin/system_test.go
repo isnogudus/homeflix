@@ -94,7 +94,7 @@ func TestUnknownEndpointLoggedOnceWithoutQuery(t *testing.T) {
 	var logs bytes.Buffer
 	h := newTestServer(t, &logs).Handler()
 	for range 3 {
-		if rec := get(t, h, "/Plugins?ApiKey=secret", nil); rec.Code != http.StatusNotFound {
+		if rec := get(t, h, "/Packages?ApiKey=secret", nil); rec.Code != http.StatusNotFound {
 			t.Fatalf("status %d", rec.Code)
 		}
 	}
@@ -124,5 +124,51 @@ func TestPanicBecomes500(t *testing.T) {
 	rec := get(t, h, "/x", nil)
 	if rec.Code != http.StatusInternalServerError || !strings.Contains(logs.String(), "boom") {
 		t.Errorf("status %d, logs %q", rec.Code, logs.String())
+	}
+}
+
+func TestQuickConnectDisabled(t *testing.T) {
+	h := newTestServer(t, nil).Handler()
+	for _, tc := range []struct{ method, path string }{
+		{"POST", "/QuickConnect/Initiate"}, {"GET", "/QuickConnect/Connect?Secret=x"}, {"POST", "/Users/AuthenticateWithQuickConnect"},
+	} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(tc.method, tc.path, nil))
+		if rec.Code != http.StatusUnauthorized || !strings.Contains(rec.Body.String(), "Quick connect is disabled") {
+			t.Errorf("%s %s: %d %q", tc.method, tc.path, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+func TestEncodingConfigurationAndPlugins(t *testing.T) {
+	s := newTestServer(t, nil)
+	addUser(t, s, "anna", "pw", false)
+	c := &apiClient{t: t, h: s.Handler()}
+	login(t, c, "anna", "pw")
+	enc := decode[map[string]any](t, c.do("GET", "/System/Configuration/encoding", "", nil))
+	if enc["HardwareAccelerationType"] != "none" || enc["EnableHardwareEncoding"] != false {
+		t.Errorf("encoding: %v", enc)
+	}
+	if rec := c.do("GET", "/System/Configuration/network", "", nil); rec.Code != http.StatusNotFound {
+		t.Errorf("other section: %d", rec.Code)
+	}
+	if rec := c.do("GET", "/Plugins", "", nil); rec.Code != 200 || strings.TrimSpace(rec.Body.String()) != "[]" {
+		t.Errorf("plugins: %d %q", rec.Code, rec.Body.String())
+	}
+	if rec := get(t, s.Handler(), "/Plugins", nil); rec.Code != http.StatusUnauthorized {
+		t.Errorf("plugins without token: %d", rec.Code)
+	}
+}
+
+func TestPluginProbesAreQuiet(t *testing.T) {
+	var logs bytes.Buffer
+	h := newTestServer(t, &logs).Handler()
+	for _, p := range pluginProbes {
+		if rec := get(t, h, p, nil); rec.Code != http.StatusNotFound {
+			t.Errorf("%s: %d", p, rec.Code)
+		}
+	}
+	if strings.Contains(logs.String(), "unsupported endpoint") {
+		t.Errorf("plugin probes logged as unsupported:\n%s", logs.String())
 	}
 }

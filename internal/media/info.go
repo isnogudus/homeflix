@@ -223,9 +223,9 @@ func convertStream(f ffStream) (Stream, bool) {
 		s.Type = "Subtitle"
 		s.Codec = normalizeSubtitleCodec(s.Codec)
 		s.IsTextSubtitleStream = isTextSubtitle(s.Codec)
-		// Embedded subtitles reach the client inside the container. Serving
-		// them as separate files would mean reading the whole file with
-		// ffmpeg, which homeflix does not offer yet.
+		// Embedded subtitles reach the client inside the container. Text
+		// tracks can be fetched as files too, but ffmpeg must read the whole
+		// video for that, so clients are not pointed there.
 		s.SupportsExternalStream = false
 	case "data":
 		s.Type = "Data"

@@ -1,7 +1,8 @@
 #!/bin/sh
 # Runs a throwaway homeflix instance on 127.0.0.1 with its own data
-# directory and a generated test user, walks through the client login flow
-# with curl, and removes everything afterwards.
+# directory, a generated test user and a generated two-second movie, walks
+# through the client flow with curl, and removes everything afterwards.
+# Needs ffmpeg and ffprobe in PATH.
 #
 # Usage: scripts/smoke-test.sh <path-to-homeflix-binary> [port]
 # On the development host: ssh claude 'sh -s -- homeflix/bin/homeflix' < scripts/smoke-test.sh
@@ -29,12 +30,18 @@ fail() {
 	exit 1
 }
 
+mkdir "$work/media"
+printf '1\n00:00:00,500 --> 00:00:01,500\nsmoke subtitle\n' >"$work/sub.srt"
+ffmpeg -loglevel error -f lavfi -i testsrc=duration=2:size=320x240:rate=10 -i "$work/sub.srt" \
+	-map 0 -map 1 -c:v mpeg4 -c:s srt "$work/media/Smoke Test (2026).mkv" || fail "cannot make the test movie"
+
 cat >"$work/homeflix.conf" <<EOF
 server name "smoke"
 listen on 127.0.0.1 port $port
 data directory "data"
 log level debug
 no scan interval
+library "Smoke" { path "$work/media" }
 EOF
 
 password=$(openssl rand -hex 16)
@@ -81,6 +88,22 @@ grep -q '"SortBy":"ProductionYear"' "$work/body" || fail "display preferences no
 expect 200 GET /UserViews
 expect 200 GET /Items/Latest
 expect 200 GET /Sessions
+
+expect 200 GET '/Items?Recursive=true&IncludeItemTypes=Movie'
+item=$(sed -E 's/.*"Id":"([0-9a-f]{32})".*/\1/' "$work/body")
+[ ${#item} -eq 32 ] || fail "test movie not in the library: $(cat "$work/body")"
+expect 200 GET "/Videos/$item/$item/Subtitles/1/0/Stream.srt"
+grep -q "smoke subtitle" "$work/body" || fail "extracted subtitles lack the text: $(cat "$work/body")"
+expect 200 GET "/Videos/$item/$item/Subtitles/1/Stream.vtt"
+grep -q "^WEBVTT" "$work/body" || fail "WebVTT output lacks its header: $(cat "$work/body")"
+expect 404 GET "/Videos/$item/$item/Subtitles/0/Stream.srt"
+
+# The WebSocket handshake; curl then waits for data until it times out.
+got=$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
+	-H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: c21va2UtdGVzdC1rZXkxMg==' \
+	"$base/socket?ApiKey=$token&deviceId=smoke-1" || true)
+[ "$got" = 101 ] || fail "WebSocket handshake: status $got, want 101"
+echo "ok   101 GET /socket"
 expect 204 POST /Sessions/Logout
 expect 401 GET /Users/Me
 

@@ -75,7 +75,12 @@ func (rt *Router) HandleFunc(method, pattern string, h http.HandlerFunc) {
 func (rt *Router) sortRoutes() {
 	sort.SliceStable(rt.routes, func(i, j int) bool {
 		a, b := rt.routes[i].segments, rt.routes[j].segments
-		for k := 0; k < len(a) && k < len(b); k++ {
+		// Only routes of the same length compete for a path; ordering by
+		// length first keeps the order consistent across lengths.
+		if len(a) != len(b) {
+			return len(a) < len(b)
+		}
+		for k := range a {
 			if a[k].kind != b[k].kind {
 				return a[k].kind < b[k].kind
 			}

@@ -72,6 +72,7 @@ library Doku { path ${movies}_doku }
 		ScanInterval:    90 * time.Minute,
 		SortArticles:    []string{"the", "der", "die", "das"},
 		DisplayLanguage: "de",
+		Discovery:       true,
 		Libraries: []Library{
 			{Name: "Filme", Paths: []string{"/export/movies/plex", "/export/movies/archiv", "/srv/neue filme"}},
 			{Name: "Doku", Paths: []string{"/export/movies_doku"}},
@@ -98,12 +99,18 @@ func TestListenForms(t *testing.T) {
 }
 
 func TestNegations(t *testing.T) {
-	cfg, err := parseString(t, "no scan interval\nno sort articles\n")
+	cfg, err := parseString(t, "no scan interval\nno sort articles\nno discovery\n")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.ScanInterval != 0 || cfg.SortArticles != nil {
+	if cfg.ScanInterval != 0 || cfg.SortArticles != nil || cfg.Discovery {
 		t.Errorf("negations: %+v", cfg)
+	}
+	if cfg, err := parseString(t, "discovery\n"); err != nil || !cfg.Discovery {
+		t.Errorf("discovery: %v %v", cfg.Discovery, err)
+	}
+	if _, err := parseString(t, "discovery\nno discovery\n"); err == nil || !strings.Contains(err.Error(), `"discovery" given twice`) {
+		t.Errorf("discovery and no discovery: %v", err)
 	}
 }
 

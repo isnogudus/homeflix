@@ -3,9 +3,13 @@
 package jellyfin
 
 import (
+	"bufio"
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"runtime/debug"
 	"sync"
@@ -14,6 +18,7 @@ import (
 	"homeflix/internal/catalog"
 	"homeflix/internal/images"
 	"homeflix/internal/store"
+	"homeflix/internal/subtitles"
 )
 
 // CompatVersion is the Jellyfin server version homeflix reports. Clients
@@ -36,6 +41,10 @@ type Server struct {
 	RequestScan func()
 	Catalog     *catalog.Catalog
 	Images      *images.Service
+	Subtitles   *subtitles.Service
+	// Shutdown ends long-lived connections such as WebSockets, which
+	// http.Server.Shutdown does not wait for.
+	Shutdown context.Context
 
 	unknownMu   sync.Mutex
 	unknownSeen map[string]struct{}
@@ -56,6 +65,8 @@ func (s *Server) Handler() http.Handler {
 	s.registerImages(rt)
 	s.registerPlayback(rt)
 	s.registerUserData(rt)
+	s.registerSocket(rt)
+	s.registerSubtitles(rt)
 	return s.recoverPanics(s.logRequests(rt))
 }
 
@@ -99,6 +110,25 @@ func (w *statusRecorder) Write(b []byte) (int, error) {
 }
 
 func (w *statusRecorder) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+// Hijack lets WebSocket connections take over the connection.
+func (w *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	h, ok := w.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, errors.New("connection cannot be taken over")
+	}
+	if w.status == 0 {
+		w.status = http.StatusSwitchingProtocols
+	}
+	return h.Hijack()
+}
+
+// Flush sends buffered data to the client.
+func (w *statusRecorder) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
 
 // ReadFrom keeps the underlying writer's ReadFrom reachable, so files are
 // sent with sendfile(2) instead of being copied through user space.

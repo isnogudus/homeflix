@@ -7,6 +7,7 @@
 
 #server name "homeflix"		# shown to clients; default: the host name
 #listen on * port 8096		# or an address: listen on 192.168.1.10
+#discovery			# answer clients searching the network; or: no discovery
 #data directory "/var/db/homeflix"
 #log level info			# debug logs every request
 #language en			# audio and subtitle titles: en or de

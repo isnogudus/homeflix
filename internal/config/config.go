@@ -46,6 +46,8 @@ type Config struct {
 	// TMDB enables metadata from The Movie Database; nil keeps homeflix
 	// offline.
 	TMDB *TMDB
+	// Discovery answers clients looking for servers on the local network.
+	Discovery bool
 
 	Libraries []Library
 
@@ -92,11 +94,12 @@ func Default() Config {
 		ScanInterval:    6 * time.Hour,
 		SortArticles:    []string{"the", "a", "an"},
 		DisplayLanguage: "en",
+		Discovery:       true,
 	}
 }
 
 var keywords = []string{
-	"articles", "data", "directory", "ffmpeg", "ffprobe", "file", "image", "interval",
+	"articles", "data", "directory", "discovery", "ffmpeg", "ffprobe", "file", "image", "interval",
 	"language", "level", "library", "listen", "log", "name", "no", "on", "path",
 	"port", "probe", "scan", "server", "sort", "tmdb", "token", "workers",
 }
@@ -321,6 +324,12 @@ func (p *parser) statement() bool {
 		return p.tmdb()
 	case p.Accept("no", "tmdb"):
 		return p.once("tmdb", t.Pos)
+	case p.Accept("discovery"):
+		p.cfg.Discovery = true
+		return p.once("discovery", t.Pos)
+	case p.Accept("no", "discovery"):
+		p.cfg.Discovery = false
+		return p.once("discovery", t.Pos)
 	case p.Is("no") && p.Peek(1).Kind == obsdconf.Word:
 		p.Errorf(t.Pos, "unknown statement %q", "no "+p.Peek(1).Text)
 		return false

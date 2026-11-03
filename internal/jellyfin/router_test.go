@@ -73,3 +73,22 @@ func TestRouterRejectsBadPattern(t *testing.T) {
 	}()
 	(&Router{}).HandleFunc("GET", "/a/{x}{y}", nil)
 }
+
+// Literal segments must win regardless of the order routes of other
+// lengths were registered in.
+func TestRouterLiteralWinsAcrossLengths(t *testing.T) {
+	rt := &Router{}
+	echo := func(name string) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, name) }
+	}
+	rt.HandleFunc(http.MethodGet, "/Items/{id}", echo("item"))
+	rt.HandleFunc(http.MethodGet, "/Items", echo("items"))
+	rt.HandleFunc(http.MethodGet, "/Items/Latest", echo("latest"))
+	for path, want := range map[string]string{"/Items/Latest": "latest", "/Items/x": "item", "/Items": "items"} {
+		rec := httptest.NewRecorder()
+		rt.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
+		if rec.Body.String() != want {
+			t.Errorf("%s: %q, want %q", path, rec.Body.String(), want)
+		}
+	}
+}

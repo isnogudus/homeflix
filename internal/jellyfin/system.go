@@ -3,6 +3,7 @@ package jellyfin
 import (
 	"net/http"
 	"runtime"
+	"strings"
 )
 
 // PublicSystemInfo is the unauthenticated server description clients probe
@@ -61,6 +62,60 @@ func (s *Server) registerSystem(rt *Router) {
 	rt.HandleFunc(http.MethodPost, "/System/Ping", s.ping)
 	rt.HandleFunc(http.MethodGet, "/Branding/Configuration", s.brandingConfiguration)
 	rt.HandleFunc(http.MethodGet, "/QuickConnect/Enabled", s.quickConnectEnabled)
+	rt.HandleFunc(http.MethodPost, "/QuickConnect/Initiate", quickConnectDisabled)
+	rt.HandleFunc(http.MethodGet, "/QuickConnect/Connect", quickConnectDisabled)
+	rt.HandleFunc(http.MethodPost, "/QuickConnect/Authorize", quickConnectDisabled)
+	rt.HandleFunc(http.MethodPost, "/Users/AuthenticateWithQuickConnect", quickConnectDisabled)
+	rt.HandleFunc(http.MethodGet, "/System/Configuration/{key}", s.authed(s.namedConfiguration))
+	// homeflix has no plugins.
+	rt.HandleFunc(http.MethodGet, "/Plugins", s.authed(func(w http.ResponseWriter, r *http.Request, _ *Session) {
+		writeJSON(w, http.StatusOK, []any{})
+	}))
+	// Clients probe for server plugins they can use; the answer is that
+	// there are none, without a warning in the log.
+	for _, p := range pluginProbes {
+		rt.HandleFunc(http.MethodGet, p, http.NotFound)
+	}
+}
+
+// pluginProbes are the plugin endpoints Moonfin asks for at startup.
+var pluginProbes = []string{
+	"/Moonfin/Ping",
+	"/Moonfin/Pin",
+	"/Moonfin/Games/Libraries",
+	"/Moonfin/AnimeMarkers/Items",
+	"/Plugins/AchievementBadges/public-config",
+}
+
+// EncodingOptions is the part of Jellyfin's transcoding configuration
+// clients read to learn what the server can convert: nothing.
+type EncodingOptions struct {
+	HardwareAccelerationType string   `json:"HardwareAccelerationType"`
+	EnableHardwareEncoding   bool     `json:"EnableHardwareEncoding"`
+	HardwareDecodingCodecs   []string `json:"HardwareDecodingCodecs"`
+	AllowHevcEncoding        bool     `json:"AllowHevcEncoding"`
+	AllowAv1Encoding         bool     `json:"AllowAv1Encoding"`
+	EnableTonemapping        bool     `json:"EnableTonemapping"`
+	EnableSubtitleExtraction bool     `json:"EnableSubtitleExtraction"`
+}
+
+// namedConfiguration serves the configuration sections clients ask for.
+func (s *Server) namedConfiguration(w http.ResponseWriter, r *http.Request, sess *Session) {
+	if !strings.EqualFold(r.PathValue("key"), "encoding") {
+		http.NotFound(w, r)
+		return
+	}
+	writeJSON(w, http.StatusOK, EncodingOptions{
+		HardwareAccelerationType: "none",
+		HardwareDecodingCodecs:   []string{},
+		EnableSubtitleExtraction: true,
+	})
+}
+
+// quickConnectDisabled answers as Jellyfin does with QuickConnect off, so
+// clients tell the user instead of reporting an unknown error.
+func quickConnectDisabled(w http.ResponseWriter, r *http.Request) {
+	http.Error(w, "Quick connect is disabled", http.StatusUnauthorized)
 }
 
 func (s *Server) publicInfo(r *http.Request) PublicSystemInfo {

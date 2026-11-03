@@ -114,8 +114,20 @@ for all addresses.
 The default is
 .Ic listen on * port 8096 ,
 the port Jellyfin clients try first.
+.It Ic discovery
+Answer the broadcasts on UDP port 7359 with which Jellyfin clients look
+for servers in the local network, so they list homeflix without its
+address being typed in.
+Only queries from private, loopback and link-local addresses are
+answered.
+Nothing is sent unasked.
+Discovery is off when the server listens on a loopback address only.
+This is the default.
+.It Ic no discovery
+Do not listen on UDP port 7359.
 .It Ic data directory Ar path
-The directory for the database and the image cache, created if missing.
+The directory for the database and the caches of images and subtitles,
+created if missing.
 A relative path is taken relative to the directory of the configuration
 file.
 The default is
@@ -144,7 +156,8 @@ The default is
 .It Ic ffmpeg Ar path
 The
 .Xr ffmpeg 1
-binary that takes stills for posters and backdrops, looked up in
+binary that takes stills for posters and backdrops and extracts embedded
+text subtitles for clients that ask for them as files, looked up in
 .Ev PATH
 unless absolute.
 The default is

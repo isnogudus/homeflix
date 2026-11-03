@@ -15,6 +15,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -22,12 +23,14 @@ import (
 
 	"homeflix/internal/catalog"
 	"homeflix/internal/config"
+	"homeflix/internal/discovery"
 	"homeflix/internal/images"
 	"homeflix/internal/jellyfin"
 	"homeflix/internal/library"
 	"homeflix/internal/media"
 	"homeflix/internal/metadata"
 	"homeflix/internal/store"
+	"homeflix/internal/subtitles"
 )
 
 // version is set at build time with -ldflags "-X main.version=…".
@@ -153,6 +156,7 @@ func serve(args []string, stdout, stderr io.Writer) error {
 		log.Info("TMDB metadata off; homeflix makes no outbound connections")
 	}
 	imgs := &images.Service{FFmpeg: cfg.FFmpeg, Dir: filepath.Join(cfg.DataDir, "images"), Workers: cfg.ImageWorkers, Log: log}
+	subs := &subtitles.Service{FFmpeg: cfg.FFmpeg, Dir: filepath.Join(cfg.DataDir, "subtitles"), Log: log}
 
 	var background sync.WaitGroup
 	defer background.Wait()
@@ -168,7 +172,9 @@ func serve(args []string, stdout, stderr io.Writer) error {
 		go func() {
 			defer background.Done()
 			defer warming.Store(false)
-			imgs.Warm(ctx, cat.Snapshot().AllMovies())
+			movies := cat.Snapshot().AllMovies()
+			subs.RemoveUnused(movies)
+			imgs.Warm(ctx, movies)
 		}()
 	}
 	scanner := newScanner(cfg, db, log)
@@ -199,6 +205,9 @@ func serve(args []string, stdout, stderr io.Writer) error {
 			warm()
 		})
 	}()
+	if cfg.Discovery {
+		startDiscovery(ctx, &background, cfg, serverID, log)
+	}
 	// Commands such as "homeflix match" change the database while the
 	// server runs; they bump a version the server watches.
 	background.Add(1)
@@ -213,8 +222,10 @@ func serve(args []string, stdout, stderr io.Writer) error {
 		Store:            db,
 		Catalog:          cat,
 		Images:           imgs,
+		Subtitles:        subs,
 		Log:              log,
 		FailedLoginDelay: time.Second,
+		Shutdown:         ctx,
 		RequestScan: func() {
 			select {
 			case scanTrigger <- struct{}{}:
@@ -256,6 +267,33 @@ func serve(args []string, stdout, stderr io.Writer) error {
 	}
 	log.Info("stopped")
 	return nil
+}
+
+// startDiscovery answers "who is JellyfinServer?" broadcasts, unless the
+// API listens on loopback only, where nobody else could reach it.
+func startDiscovery(ctx context.Context, wg *sync.WaitGroup, cfg config.Config, serverID string, log *slog.Logger) {
+	host, portText, _ := net.SplitHostPort(cfg.Listen)
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsUnspecified() {
+		host = ""
+	}
+	port, _ := strconv.Atoi(portText)
+	conn, err := net.ListenUDP("udp4", &net.UDPAddr{Port: discovery.Port})
+	if err != nil {
+		log.Warn("discovery off: cannot listen", "port", discovery.Port, "err", err)
+		return
+	}
+	r := &discovery.Responder{ServerID: serverID, ServerName: cfg.ServerName, Host: host, Port: port, Log: log}
+	log.Info("answering discovery requests", "port", discovery.Port)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := r.Serve(ctx, conn); err != nil {
+			log.Error("discovery stopped", "err", err)
+		}
+	}()
 }
 
 // watchCatalogVersion reloads the catalog when another process bumped the
