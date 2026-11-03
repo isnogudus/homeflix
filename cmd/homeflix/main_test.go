@@ -24,15 +24,39 @@ func TestRunCommands(t *testing.T) {
 	if err := run([]string{"frobnicate"}, cio); err == nil {
 		t.Error("unknown command: want error")
 	}
-	if err := run([]string{"serve", "-config", "/nonexistent/homeflix.toml"}, cio); err == nil {
+	if err := run([]string{"serve", "-config", "/nonexistent/homeflix.conf"}, cio); err == nil {
 		t.Error("serve with missing config: want error")
+	}
+}
+
+func TestServeCheckOnly(t *testing.T) {
+	dir := t.TempDir()
+	good := filepath.Join(dir, "good.conf")
+	os.WriteFile(good, []byte("unused = 1\nlisten on 127.0.0.1 port 18096\nlibrary Filme { path /m }\n"), 0o600)
+	cio, out, errOut := testIO("")
+	if err := run([]string{"serve", "-n", "-config", good}, cio); err != nil || out.String() != "configuration OK\n" {
+		t.Errorf("valid config: %v, %q", err, out.String())
+	}
+	if !strings.Contains(errOut.String(), "warning: ") || !strings.Contains(errOut.String(), "macro unused is not used") {
+		t.Errorf("unused macro not warned about: %q", errOut.String())
+	}
+	if _, err := os.Stat(filepath.Join(dir, "data")); err == nil {
+		t.Error("-n created the data directory")
+	}
+
+	bad := filepath.Join(dir, "bad.conf")
+	os.WriteFile(bad, []byte("listen on nowhere\nlog level loud\n"), 0o600)
+	cio, _, _ = testIO("")
+	err := run([]string{"serve", "-n", "-config", bad}, cio)
+	if err == nil || !strings.Contains(err.Error(), "bad.conf:1:") || !strings.Contains(err.Error(), "bad.conf:2:") {
+		t.Errorf("invalid config: want both errors with lines, got %v", err)
 	}
 }
 
 func TestUserCommands(t *testing.T) {
 	dir := t.TempDir()
-	cfg := filepath.Join(dir, "homeflix.toml")
-	if err := os.WriteFile(cfg, []byte("data_dir = \"data\"\n"), 0o600); err != nil {
+	cfg := filepath.Join(dir, "homeflix.conf")
+	if err := os.WriteFile(cfg, []byte("data directory \"data\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	user := func(stdin string, args ...string) (string, error) {

@@ -29,17 +29,18 @@ fail() {
 	exit 1
 }
 
-cat >"$work/homeflix.toml" <<EOF
-server_name = "smoke"
-listen = "127.0.0.1:$port"
-data_dir = "data"
-log_level = "debug"
+cat >"$work/homeflix.conf" <<EOF
+server name "smoke"
+listen on 127.0.0.1 port $port
+data directory "data"
+log level debug
+no scan interval
 EOF
 
 password=$(openssl rand -hex 16)
-printf '%s\n' "$password" | "$bin" user add smoke -config "$work/homeflix.toml" >/dev/null
+printf '%s\n' "$password" | "$bin" user add smoke -config "$work/homeflix.conf" >/dev/null
 
-"$bin" serve -config "$work/homeflix.toml" >"$work/server.log" 2>&1 &
+"$bin" serve -config "$work/homeflix.conf" >"$work/server.log" 2>&1 &
 pid=$!
 i=0
 until curl -fs "$base/System/Ping" >/dev/null 2>&1; do

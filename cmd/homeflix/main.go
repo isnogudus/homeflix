@@ -32,7 +32,7 @@ import (
 // version is set at build time with -ldflags "-X main.version=…".
 var version = "dev"
 
-const defaultConfigPath = "/usr/local/etc/homeflix.toml"
+const defaultConfigPath = "/usr/local/etc/homeflix.conf"
 
 func main() {
 	cio := cliIO{stdin: os.Stdin, stdout: os.Stdout, stderr: os.Stderr}
@@ -63,7 +63,7 @@ func run(args []string, cio cliIO) error {
 	}
 	switch args[0] {
 	case "serve":
-		return serve(args[1:], cio.stderr)
+		return serve(args[1:], cio.stdout, cio.stderr)
 	case "scan":
 		return scanCommand(args[1:], cio)
 	case "stats":
@@ -82,10 +82,11 @@ func run(args []string, cio cliIO) error {
 	}
 }
 
-func serve(args []string, stderr io.Writer) error {
+func serve(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	configPath := fs.String("config", defaultConfigPath, "configuration file")
+	checkOnly := fs.Bool("n", false, "check the configuration only")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -93,8 +94,17 @@ func serve(args []string, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	level, _ := cfg.SlogLevel()
-	log := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: level}))
+	if *checkOnly {
+		for _, w := range cfg.Warnings {
+			fmt.Fprintln(stderr, "warning:", w)
+		}
+		fmt.Fprintln(stdout, "configuration OK")
+		return nil
+	}
+	log := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: cfg.SlogLevel()}))
+	for _, w := range cfg.Warnings {
+		log.Warn("configuration", "warning", w)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -146,7 +156,7 @@ func serve(args []string, stderr io.Writer) error {
 	background.Add(1)
 	go func() {
 		defer background.Done()
-		runScans(ctx, scanner, cfg.ScanInterval.Duration, scanTrigger, log, func(rep library.Report) {
+		runScans(ctx, scanner, cfg.ScanInterval, scanTrigger, log, func(rep library.Report) {
 			if rep.Changed() {
 				if err := cat.Reload(ctx); err != nil && ctx.Err() == nil {
 					log.Error("reload catalog", "err", err)

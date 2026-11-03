@@ -41,7 +41,7 @@ func scanCommand(args []string, cio cliIO) error {
 	if err != nil {
 		return err
 	}
-	level, _ := cfg.SlogLevel()
+	level := cfg.SlogLevel()
 	log := slog.New(slog.NewTextHandler(cio.stderr, &slog.HandlerOptions{Level: level}))
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

@@ -1,0 +1,29 @@
+# homeflix.conf(5) -- copy to /usr/local/etc/homeflix.conf.
+# Every statement is optional; the values shown are the defaults.
+# Check the file with: homeflix serve -n -config /usr/local/etc/homeflix.conf
+
+# Macros may hold values used several times, as in pf.conf.
+#movies = "/media/movies"
+
+#server name "homeflix"		# shown to clients; default: the host name
+#listen on * port 8096		# or an address: listen on 192.168.1.10
+#data directory "/var/db/homeflix"
+#log level info			# debug logs every request
+#language en			# audio and subtitle titles: en or de
+
+#ffprobe "ffprobe"		# looked up in PATH unless absolute
+#ffmpeg "ffmpeg"
+#probe workers 4		# ffprobe processes while scanning
+#image workers 2		# ffmpeg processes making artwork
+
+#scan interval 6h		# or: no scan interval
+#sort articles { the a an }	# or: no sort articles
+
+# A movie is a single file, a set of "part1", "part2" files, or a folder
+# named "Title (Year)" holding versions, parts and extras folders such as
+# "behind the scenes" or "trailers". Movies that disappear are kept for
+# 30 days, so renames and remounts keep watch state.
+#library "Movies" {
+#	path $movies
+#	path "/media/more movies"
+#}

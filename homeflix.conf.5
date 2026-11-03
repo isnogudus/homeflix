@@ -1,0 +1,232 @@
+.Dd November 3, 2026
+.Dt HOMEFLIX.CONF 5
+.Os
+.Sh NAME
+.Nm homeflix.conf
+.Nd homeflix configuration file
+.Sh DESCRIPTION
+.Nm
+configures the media server homeflix: where it listens, where it keeps its
+data, which tools it runs and which directories make up its movie
+libraries.
+Every statement is optional; a missing statement keeps its default.
+.Pp
+The file usually has these sections, in this order:
+.Bl -tag -width xxxx
+.It Sy Macros
+User-defined variables that may be used later in the file.
+.It Sy Global configuration
+Settings of the server.
+.It Sy Libraries
+The movie libraries and their directories.
+.El
+.Pp
+Each statement ends at the end of the line.
+A backslash at the very end of a line continues the statement on the next
+line.
+Comments start with
+.Sq #
+and run to the end of the line.
+Words are separated by whitespace; a value containing spaces or special
+characters has to be enclosed in double quotes, in which
+.Sq \e\(dq
+and
+.Sq \e\e
+are the only escapes.
+.Pp
+Lists are enclosed in curly braces and may span several lines; commas
+between their items are optional.
+A block, such as
+.Ic library ,
+opens with a curly brace at the end of the line and closes with one on a
+line of its own.
+As in
+.Xr httpd.conf 5 ,
+a block with one statement may stand on one line:
+.Bd -literal -offset indent
+library "Documentaries" { path "/media/docs" }
+.Ed
+.Pp
+Durations are given in seconds, or as numbers with the units
+.Cm ms ,
+.Cm s ,
+.Cm m ,
+.Cm h ,
+.Cm d
+and
+.Cm w ,
+as in
+.Li 90m
+or
+.Li 1h30m .
+.Pp
+Statements that set a value may be given only once.
+.Ic homeflix serve -n
+checks the file and reports every error with file name and line.
+.Sh MACROS
+A macro is defined as
+.Ar name Ns = Ns Ar value
+at top level and used as
+.Li $ Ns Ar name .
+Names consist of letters, digits and underscores and must not be keywords.
+As in
+.Xr pf.conf 5 ,
+a quoted value is split into words again, so a macro may hold a list:
+.Bd -literal -offset indent
+words = "{ the a an der die das }"
+sort articles $words
+.Ed
+.Pp
+A macro stands for whole words; it is not expanded inside a word, so
+.Li $movies/plex
+does not work.
+Macros that are defined but never used are reported as warnings.
+.Pp
+Further files may be included with
+.Ic include Qq Ar file ,
+relative to the including file.
+.Sh GLOBAL CONFIGURATION
+.Bl -tag -width Ds
+.It Ic server name Ar name
+The name clients show for the server.
+The default is the host name.
+.It Ic listen on Ar address Op Ic port Ar number
+Listen for HTTP connections on
+.Ar address ,
+an IPv4 or IPv6 address, or
+.Sq *
+for all addresses.
+The default is
+.Ic listen on * port 8096 ,
+the port Jellyfin clients try first.
+.It Ic data directory Ar path
+The directory for the database and the image cache, created if missing.
+A relative path is taken relative to the directory of the configuration
+file.
+The default is
+.Pa /var/db/homeflix .
+.It Ic log level Cm debug | info | warn | error
+How much to log.
+At
+.Cm debug
+every request is logged, without its query string, since clients put
+access tokens there.
+The default is
+.Cm info .
+.It Ic language Cm en | de
+The language of the titles of audio and subtitle tracks: English, as
+Jellyfin writes them, or German.
+The default is
+.Cm en .
+.It Ic ffprobe Ar path
+The
+.Xr ffprobe 1
+binary that reads the streams of media files, looked up in
+.Ev PATH
+unless absolute.
+The default is
+.Pa ffprobe .
+.It Ic ffmpeg Ar path
+The
+.Xr ffmpeg 1
+binary that takes stills for posters and backdrops, looked up in
+.Ev PATH
+unless absolute.
+The default is
+.Pa ffmpeg .
+.It Ic probe workers Ar number
+How many ffprobe processes run in parallel while scanning, 1 to 64.
+The default is 4.
+.It Ic image workers Ar number
+How many ffmpeg processes take stills in parallel, 1 to 16.
+The default is 2.
+.It Ic scan interval Ar duration
+The time between automatic scans of the libraries, from 1 minute to
+30 days.
+A scan also runs at startup and when an administrator refreshes the
+library from a client.
+The default is 6 hours.
+.It Ic no scan interval
+Scan only at startup and on request.
+.It Ic sort articles Ar list
+Leading words ignored when sorting by name, so that
+.Dq The Abyss
+sorts under A.
+The default is
+.Li { the a an } .
+.It Ic no sort articles
+Sort by the full name.
+.El
+.Sh LIBRARIES
+.Bl -tag -width Ds
+.It Ic library Ar name Brq ...
+A movie library shown to clients under
+.Ar name .
+Names are unique regardless of case.
+The block holds one or more
+.Ic path
+statements:
+.Bl -tag -width Ds
+.It Ic path Ar path | list
+A directory of the library.
+Paths must be absolute and must not lie inside each other, also across
+libraries.
+.El
+.El
+.Pp
+In a library directory, a movie is
+.Bl -bullet
+.It
+a single file, named
+.Dq Title (Year) ,
+optionally followed by
+.Dq [imdbid-tt1234567] ,
+.It
+a set of files next to each other ending in
+.Dq part1 ,
+.Dq part2
+or
+.Dq cd1 ,
+.Dq cd2 ,
+.It
+or a folder named
+.Dq Title (Year)
+holding one or more versions, such as
+.Dq [HD]
+and
+.Dq [SD] ,
+each a single file or a set of parts, and extras folders such as
+.Dq behind the scenes ,
+.Dq featurettes
+or
+.Dq trailers .
+.El
+.Pp
+A movie that disappears is kept for 30 days, so that renames and remounts
+keep its watch state.
+A library directory that cannot be read leaves its movies as they are.
+.Sh FILES
+.Bl -tag -width Ds -compact
+.It Pa /usr/local/etc/homeflix.conf
+default configuration file
+.El
+.Sh EXAMPLES
+.Bd -literal -offset indent
+server name "Kino"
+listen on 192.168.21.15
+language de
+sort articles { the a an der die das }
+
+ffprobe "/usr/local/bin/ffprobe"
+ffmpeg "/usr/local/bin/ffmpeg"
+
+library "Filme" {
+	path "/export/movies/plex"
+	path "/export/movies/archiv"
+}
+.Ed
+.Sh SEE ALSO
+.Xr ffmpeg 1 ,
+.Xr ffprobe 1 ,
+.Xr httpd.conf 5 ,
+.Xr pf.conf 5

@@ -29,26 +29,50 @@ make build-freebsd    # build/homeflix-freebsd-amd64, no cgo needed
 ## Run
 
 ```sh
-cp deploy/homeflix.toml.sample homeflix.toml   # edit as needed
-build/homeflix serve -config homeflix.toml
+cp deploy/homeflix.conf.sample homeflix.conf   # edit as needed
+build/homeflix serve -n -config homeflix.conf  # check it
+build/homeflix serve -config homeflix.conf
 ```
 
 On FreeBSD, install the binary as `/usr/local/bin/homeflix`, the
-configuration as `/usr/local/etc/homeflix.toml`, and
-`deploy/freebsd/homeflix` as `/usr/local/etc/rc.d/homeflix`, then:
+configuration as `/usr/local/etc/homeflix.conf`, `homeflix.conf.5` as
+`/usr/local/share/man/man5/homeflix.conf.5`, and `deploy/freebsd/homeflix`
+as `/usr/local/etc/rc.d/homeflix`, then:
 
 ```sh
 pw useradd homeflix -d /nonexistent -s /usr/sbin/nologin
 sysrc homeflix_enable=YES
+service homeflix configtest
 service homeflix start
 ```
 
 The account needs read access to the media directories.
 
+## Configuration
+
+`homeflix.conf` is written in the style of OpenBSD's `httpd.conf` and
+`pf.conf`, read with [obsdconf](https://github.com/isnogudus/obsdconf):
+keywords instead of punctuation, blocks and lists in braces, macros and
+`include`. [homeflix.conf(5)](homeflix.conf.5) describes every statement.
+
+```
+server name "Kino"
+listen on * port 8096
+language de
+
+library "Filme" {
+	path "/export/movies/plex"
+	path "/export/movies/archiv"
+}
+```
+
+`homeflix serve -n` checks the file and reports every error at once, with
+file name and line.
+
 ## Libraries
 
-Each `[[library]]` block in the configuration names one or more
-directories. A movie is
+Each `library` block in the configuration names one or more directories.
+A movie is
 
 - a single file: `Heat (1995) [imdbid-tt0113277].mkv`,
 - part files next to each other: `Intimacy (2001) cd1.avi`, `… cd2.avi`,
@@ -57,7 +81,7 @@ directories. A movie is
   `behind the scenes`, `featurettes` or `trailers`.
 
 The year and an `[imdbid-tt…]` or `{imdb-tt…}` tag are read from the name.
-Scans run at startup, every `scan_interval` and on `POST /Library/Refresh`;
+Scans run at startup, every `scan interval` and on `POST /Library/Refresh`;
 only new or changed files are probed with ffprobe. Renamed and moved files
 keep their item (matched by size and modification time, or by IMDb ID); a
 movie that disappears is kept for 30 days, and a library directory that
@@ -70,9 +94,9 @@ becomes the still that posters (cut to 2:3) and backdrops are made from.
 Stills are made in the background after each scan and on first request.
 
 ```sh
-homeflix scan -config /usr/local/etc/homeflix.toml            # scan once
-homeflix scan -reprobe -config /usr/local/etc/homeflix.toml   # probe everything again
-homeflix stats -config /usr/local/etc/homeflix.toml           # containers, codecs, HDR, failures
+homeflix scan -config /usr/local/etc/homeflix.conf            # scan once
+homeflix scan -reprobe -config /usr/local/etc/homeflix.conf   # probe everything again
+homeflix stats -config /usr/local/etc/homeflix.conf           # containers, codecs, HDR, failures
 ```
 
 ## Users
@@ -81,7 +105,7 @@ Users are managed on the command line; there is no sign-up through the API.
 Passwords are read without echo (or as one line from standard input).
 
 ```sh
-homeflix user add anna -admin -config /usr/local/etc/homeflix.toml
+homeflix user add anna -admin -config /usr/local/etc/homeflix.conf
 homeflix user passwd anna       # also signs anna out on every device
 homeflix user list              # users with their signed-in devices
 homeflix user delete anna

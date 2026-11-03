@@ -4,8 +4,8 @@
 #
 # Layout on the host, under ~/homeflix:
 #   bin/homeflix    the binary
-#   homeflix.toml   configuration, created from deploy/dev.toml if missing
-#   data/           database (data_dir = "data" in the dev config)
+#   homeflix.conf   configuration, created from deploy/dev.conf if missing
+#   data/           database (data directory "data" in the dev config)
 #   homeflix.log    server log
 #   homeflix.pid    pid of the running server
 #
@@ -23,13 +23,15 @@ echo "building $version for freebsd/amd64"
 
 ssh "$host" 'mkdir -p homeflix/bin'
 scp -q "$bin" "$host:homeflix/bin/homeflix.new"
-if ! ssh "$host" 'test -e homeflix/homeflix.toml'; then
-	scp -q "$root/deploy/dev.toml" "$host:homeflix/homeflix.toml"
+if ! ssh "$host" 'test -e homeflix/homeflix.conf'; then
+	scp -q "$root/deploy/dev.conf" "$host:homeflix/homeflix.conf"
 fi
 
 ssh "$host" 'sh -s' <<'EOF'
 set -eu
 cd ~/homeflix
+# A configuration the new binary rejects leaves the running server alone.
+bin/homeflix.new serve -n -config homeflix.conf
 if [ -f homeflix.pid ]; then
 	pid=$(cat homeflix.pid)
 	if kill "$pid" 2>/dev/null; then
@@ -46,7 +48,7 @@ if [ -f homeflix.pid ]; then
 	rm -f homeflix.pid
 fi
 mv bin/homeflix.new bin/homeflix
-daemon -f -p homeflix.pid -o homeflix.log -t homeflix bin/homeflix serve -config homeflix.toml
+daemon -f -p homeflix.pid -o homeflix.log -t homeflix bin/homeflix serve -config homeflix.conf
 sleep 1
 if [ -f homeflix.pid ] && kill -0 "$(cat homeflix.pid)" 2>/dev/null; then
 	echo "homeflix running, pid $(cat homeflix.pid)"
