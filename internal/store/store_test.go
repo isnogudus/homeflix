@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"regexp"
 	"testing"
@@ -70,5 +71,48 @@ func TestSettingRoundTrip(t *testing.T) {
 	v, ok, err := s.Setting(ctx, "k")
 	if err != nil || !ok || v != "b" {
 		t.Errorf("Setting(k) = %q, %v, %v", v, ok, err)
+	}
+}
+
+func TestBackup(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	s := openTemp(t, filepath.Join(dir, "data"))
+	id, _ := s.ServerID(ctx)
+	if _, err := s.CreateUser(ctx, "anna", "hash", true); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(dir, "copy", "homeflix.db")
+	os.MkdirAll(filepath.Dir(dst), 0o755)
+	if err := s.Backup(ctx, dst); err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Stat(dst); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("backup file: %v, %v", fi, err)
+	}
+	if err := s.Backup(ctx, dst); err == nil {
+		t.Error("existing backup overwritten")
+	}
+	// The copy is a complete database of its own.
+	c := openTemp(t, filepath.Dir(dst))
+	if got, _ := c.ServerID(ctx); got != id {
+		t.Errorf("server ID %q in copy, want %q", got, id)
+	}
+	if u, err := c.UserByName(ctx, "anna"); err != nil || !u.IsAdmin {
+		t.Errorf("user in copy: %+v, %v", u, err)
+	}
+}
+
+func TestDatabaseIsPrivate(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, FileName)
+	// An existing database readable by others is made private on open.
+	os.WriteFile(path, nil, 0o644)
+	s := openTemp(t, dir)
+	s.SetSetting(context.Background(), "k", "v")
+	for _, p := range []string{path, path + "-wal"} {
+		if fi, err := os.Stat(p); err != nil || fi.Mode().Perm() != 0o600 {
+			t.Errorf("%s: %v, %v", filepath.Base(p), fi, err)
+		}
 	}
 }

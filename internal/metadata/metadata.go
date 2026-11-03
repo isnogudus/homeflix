@@ -436,3 +436,49 @@ func (s *Service) Match(ctx context.Context, it store.Item, tmdbID int) (store.M
 	md.Status = store.MetaMatched
 	return md, s.Store.SaveMetadata(ctx, md)
 }
+
+// staleDownload is how old an unfinished download must be before it is
+// removed; younger ones may belong to a running update.
+const staleDownload = time.Hour
+
+// RemoveUnusedArtwork deletes files in dir that no metadata refers to:
+// artwork of movies deleted for good, artwork replaced by a newer one at
+// TMDB, and downloads left over from interrupted updates. It does not
+// need TMDB access, so it also runs while TMDB is switched off.
+func RemoveUnusedArtwork(ctx context.Context, st *store.Store, dir string, log *slog.Logger) (int, error) {
+	des, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	all, err := st.AllMetadata(ctx)
+	if err != nil {
+		return 0, err
+	}
+	used := map[string]bool{}
+	for _, md := range all {
+		used[md.Poster], used[md.Backdrop] = true, true
+	}
+	removed := 0
+	for _, de := range des {
+		name := de.Name()
+		if de.IsDir() || used[name] {
+			continue
+		}
+		if strings.HasPrefix(name, ".download-") {
+			if fi, err := de.Info(); err != nil || time.Since(fi.ModTime()) < staleDownload {
+				continue
+			}
+		}
+		if err := os.Remove(filepath.Join(dir, name)); err != nil {
+			return removed, err
+		}
+		removed++
+	}
+	if removed > 0 && log != nil {
+		log.Info("removed unused artwork", "files", removed)
+	}
+	return removed, nil
+}

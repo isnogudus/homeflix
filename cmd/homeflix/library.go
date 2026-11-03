@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -136,5 +137,43 @@ func statsCommand(args []string, cio cliIO) error {
 			fmt.Fprintf(w, "  %s\n", f)
 		}
 	}
+	return nil
+}
+
+func backupCommand(args []string, cio cliIO) error {
+	fs := flag.NewFlagSet("backup", flag.ContinueOnError)
+	fs.SetOutput(cio.stderr)
+	fs.Usage = func() {
+		fmt.Fprint(cio.stderr, `Usage: homeflix backup [-config path] <file>
+
+Writes a consistent copy of the database to file, also while the server
+runs. Keep it together with the metadata directory (TMDB artwork); the
+images directory is a cache and need not be kept.
+`)
+	}
+	configPath := fs.String("config", defaultConfigPath, "configuration file")
+	rest, err := parseInterspersed(fs, args)
+	if err != nil {
+		return err
+	}
+	if len(rest) != 1 {
+		fs.Usage()
+		return errors.New("backup: want one file name")
+	}
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		return err
+	}
+	ctx := context.Background()
+	db, err := store.Open(ctx, cfg.DataDir)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	if err := db.Backup(ctx, rest[0]); err != nil {
+		return err
+	}
+	fmt.Fprintf(cio.stdout, "database written to %s\nkeep it with %s; %s need not be kept\n",
+		rest[0], metadataDir(cfg), filepath.Join(cfg.DataDir, "images"))
 	return nil
 }

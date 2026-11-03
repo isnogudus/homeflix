@@ -50,6 +50,7 @@ Commands:
   serve     run the server
   scan      scan the libraries once and probe new files
   match     look up movies at TMDB, list and correct matches
+  backup    write a consistent copy of the database
   stats     summarise containers and codecs of the libraries
   user      manage users (add, passwd, delete, list)
   version   print the version
@@ -70,6 +71,8 @@ func run(args []string, cio cliIO) error {
 		return scanCommand(args[1:], cio)
 	case "match":
 		return matchCommand(args[1:], cio)
+	case "backup":
+		return backupCommand(args[1:], cio)
 	case "stats":
 		return statsCommand(args[1:], cio)
 	case "user":
@@ -189,6 +192,9 @@ func serve(args []string, stdout, stderr io.Writer) error {
 						"failed", mrep.Failed, "unchanged", mrep.Unchanged, "took", mrep.Took.Round(time.Second))
 					reload()
 				}
+			}
+			if _, err := metadata.RemoveUnusedArtwork(ctx, db, metadataDir(cfg), log); err != nil && ctx.Err() == nil {
+				log.Error("remove unused artwork", "err", err)
 			}
 			warm()
 		})

@@ -39,6 +39,18 @@ func Open(ctx context.Context, dataDir string) (*Store, error) {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
 	path := filepath.Join(dataDir, FileName)
+	// The database holds password hashes. SQLite gives its journal files
+	// the mode of the database, so a private database keeps them private.
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open database %s: %w", path, err)
+	}
+	f.Close()
+	for _, p := range []string{path, path + "-wal", path + "-shm"} {
+		if err := os.Chmod(p, 0o600); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("protect database %s: %w", p, err)
+		}
+	}
 	dsn := "file:" + (&url.URL{Path: path}).EscapedPath() +
 		"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)&_pragma=synchronous(NORMAL)"
 	db, err := sql.Open("sqlite", dsn)
@@ -184,4 +196,18 @@ func NewID() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b[:]), nil
+}
+
+// Backup writes a consistent copy of the database to path, also while
+// other connections write, and makes it readable by its owner only: it
+// holds password hashes. An existing file is not overwritten.
+func (s *Store) Backup(ctx context.Context, path string) error {
+	if _, err := os.Lstat(path); err == nil {
+		return fmt.Errorf("%s exists", path)
+	}
+	if _, err := s.db.ExecContext(ctx, "VACUUM INTO ?", path); err != nil {
+		os.Remove(path)
+		return fmt.Errorf("backup to %s: %w", path, err)
+	}
+	return os.Chmod(path, 0o600)
 }

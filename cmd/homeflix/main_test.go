@@ -97,3 +97,27 @@ func TestUserCommands(t *testing.T) {
 		t.Error("unknown subcommand: want error")
 	}
 }
+
+func TestBackupCommand(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "homeflix.conf")
+	os.WriteFile(cfg, []byte("data directory \"data\"\n"), 0o600)
+	cio, out, _ := testIO("pw\n")
+	if err := run([]string{"user", "add", "anna", "-config", cfg}, cio); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(dir, "backup.db")
+	cio, out, _ = testIO("")
+	if err := run([]string{"backup", dst, "-config", cfg}, cio); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "database written to "+dst) || !strings.Contains(out.String(), "metadata") {
+		t.Errorf("output %q", out.String())
+	}
+	if fi, err := os.Stat(dst); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Errorf("backup %v, %v", fi, err)
+	}
+	if err := run([]string{"backup", "-config", cfg}, cio); err == nil {
+		t.Error("backup without file name: want error")
+	}
+}

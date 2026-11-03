@@ -304,3 +304,40 @@ func TestPick(t *testing.T) {
 		})
 	}
 }
+
+func TestRemoveUnusedArtwork(t *testing.T) {
+	f := newFixture(t)
+	f.add("arrival", "Arrival", 2016, "tt2543164")
+	f.update()
+	md, _ := f.meta("arrival")
+	dir := f.svc.Dir
+	for _, name := range []string{"11-poster-old.jpg", ".download-fresh"} {
+		os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o644)
+	}
+	stale := filepath.Join(dir, ".download-stale")
+	os.WriteFile(stale, []byte("x"), 0o644)
+	old := time.Now().Add(-2 * time.Hour)
+	os.Chtimes(stale, old, old)
+
+	n, err := RemoveUnusedArtwork(context.Background(), f.store, dir, nil)
+	if err != nil || n != 2 {
+		t.Fatalf("removed %d, %v; want 2", n, err)
+	}
+	for name, want := range map[string]bool{
+		md.Poster: true, md.Backdrop: true, "11-poster-old.jpg": false,
+		".download-fresh": true, ".download-stale": false,
+	} {
+		_, err := os.Stat(filepath.Join(dir, name))
+		if (err == nil) != want {
+			t.Errorf("%s: exists %v, want %v", name, err == nil, want)
+		}
+	}
+	// A movie deleted for good takes its artwork with it.
+	f.store.ApplyScan(context.Background(), store.ScanChanges{DeletedItemIDs: []string{"arrival"}})
+	if n, _ := RemoveUnusedArtwork(context.Background(), f.store, dir, nil); n != 2 {
+		t.Errorf("after deleting the movie removed %d, want 2", n)
+	}
+	if n, err := RemoveUnusedArtwork(context.Background(), f.store, filepath.Join(dir, "absent"), nil); n != 0 || err != nil {
+		t.Errorf("missing directory: %d, %v", n, err)
+	}
+}

@@ -147,6 +147,26 @@ homeflix user delete anna
 `/Users/Public` always returns an empty list, so login screens ask for name
 and password instead of showing who has an account.
 
+## Backup
+
+The data directory holds three things:
+
+| Path | Content | Back up? |
+|---|---|---|
+| `homeflix.db` | users, sessions, watch state, library, metadata, manual matches | yes, with `homeflix backup` |
+| `metadata/` | artwork from TMDB | yes; fetching it again needs TMDB |
+| `images/` | stills and scaled images made from the videos | no, it is rebuilt on demand |
+
+The database must not be copied as a file while the server runs; use
+
+```sh
+homeflix backup /backup/homeflix.db -config /usr/local/etc/homeflix.conf
+```
+
+which writes a consistent copy (SQLite `VACUUM INTO`) readable by its owner
+only, since it holds password hashes. Artwork no movie uses any more is
+removed after each scan.
+
 ## Development host
 
 `scripts/deploy-dev.sh [host]` cross-compiles, copies the binary to
