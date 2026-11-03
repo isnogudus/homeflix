@@ -171,6 +171,44 @@ The default is
 .Li { the a an } .
 .It Ic no sort articles
 Sort by the full name.
+.It Ic tmdb Brq ...
+Look up title, overview, genres, cast, studios, rating, age rating and
+artwork of each movie at The Movie Database.
+Without this block homeflix makes no network connections at all; posters
+and backdrops are then cut from stills of the videos.
+With it, homeflix sends TMDB the IMDb ID from a file name, or the title
+and year, once per movie, fetches the details and two images, and keeps
+them in the data directory.
+A movie is looked up again only when its file name changes; one that was
+not found is retried after 30 days.
+The block holds:
+.Bl -tag -width Ds
+.It Ic token file Ar path
+The file holding the API Read Access Token (v4) of a TMDB account, not
+the shorter API key.
+A relative path is taken relative to the directory of the configuration
+file.
+The file must belong to root or to the user running homeflix and must not
+be writable by its group nor accessible by others, as for secrets of
+OpenBSD daemons; mode 0600 or 0640 does.
+.It Ic language Ar language
+The language of titles and overviews, as a language and country code such
+as
+.Cm de-DE ;
+English fills in missing overviews.
+The default is
+.Cm de-DE
+with
+.Ic language de ,
+and
+.Cm en-US
+otherwise.
+.El
+.Pp
+.Ic homeflix match
+lists movies without metadata and corrects wrong matches.
+.It Ic no tmdb
+Stay offline; this is the default.
 .El
 .Sh LIBRARIES
 .Bl -tag -width Ds
@@ -239,6 +277,12 @@ library "Filme" {
 	path "/export/movies/plex"
 	path "/export/movies/archiv"
 }
+.Ed
+.Pp
+To use TMDB, store the token readable only by the account running
+homeflix and add:
+.Bd -literal -offset indent
+tmdb { token file "/usr/local/etc/homeflix-tmdb.token" }
 .Ed
 .Sh SEE ALSO
 .Xr ffmpeg 1 ,

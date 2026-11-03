@@ -26,6 +26,7 @@ import (
 	"homeflix/internal/jellyfin"
 	"homeflix/internal/library"
 	"homeflix/internal/media"
+	"homeflix/internal/metadata"
 	"homeflix/internal/store"
 )
 
@@ -48,6 +49,7 @@ func usage(w io.Writer) {
 Commands:
   serve     run the server
   scan      scan the libraries once and probe new files
+  match     look up movies at TMDB, list and correct matches
   stats     summarise containers and codecs of the libraries
   user      manage users (add, passwd, delete, list)
   version   print the version
@@ -66,6 +68,8 @@ func run(args []string, cio cliIO) error {
 		return serve(args[1:], cio.stdout, cio.stderr)
 	case "scan":
 		return scanCommand(args[1:], cio)
+	case "match":
+		return matchCommand(args[1:], cio)
 	case "stats":
 		return statsCommand(args[1:], cio)
 	case "user":
@@ -128,9 +132,22 @@ func serve(args []string, stdout, stderr io.Writer) error {
 	if len(cfg.Libraries) == 0 {
 		log.Warn("no libraries configured")
 	}
-	cat := &catalog.Catalog{Store: db, Locale: media.Locale(cfg.DisplayLanguage), Log: log}
+	cat := &catalog.Catalog{Store: db, Locale: media.Locale(cfg.DisplayLanguage), Articles: cfg.SortArticles,
+		MetadataDir: metadataDir(cfg), Log: log}
 	if err := cat.Reload(ctx); err != nil {
 		return fmt.Errorf("load catalog: %w", err)
+	}
+	reload := func() {
+		if err := cat.Reload(ctx); err != nil && ctx.Err() == nil {
+			log.Error("reload catalog", "err", err)
+		}
+	}
+	meta := newMetadata(cfg, db, log)
+	if meta != nil {
+		meta.Progress = reload
+		log.Info("TMDB metadata enabled", "language", cfg.TMDB.Language, "token_file", cfg.TMDB.TokenFile)
+	} else {
+		log.Info("TMDB metadata off; homeflix makes no outbound connections")
 	}
 	imgs := &images.Service{FFmpeg: cfg.FFmpeg, Dir: filepath.Join(cfg.DataDir, "images"), Workers: cfg.ImageWorkers, Log: log}
 
@@ -158,12 +175,30 @@ func serve(args []string, stdout, stderr io.Writer) error {
 		defer background.Done()
 		runScans(ctx, scanner, cfg.ScanInterval, scanTrigger, log, func(rep library.Report) {
 			if rep.Changed() {
-				if err := cat.Reload(ctx); err != nil && ctx.Err() == nil {
-					log.Error("reload catalog", "err", err)
+				reload()
+			}
+			if meta != nil {
+				mrep, err := meta.Update(ctx)
+				switch {
+				case errors.Is(err, metadata.ErrUpdateRunning):
+				case err != nil && ctx.Err() == nil:
+					log.Error("metadata update failed", "err", err)
+				}
+				if mrep.Matched+mrep.NotFound+mrep.Failed > 0 {
+					log.Info("metadata updated", "matched", mrep.Matched, "not_found", mrep.NotFound,
+						"failed", mrep.Failed, "unchanged", mrep.Unchanged, "took", mrep.Took.Round(time.Second))
+					reload()
 				}
 			}
 			warm()
 		})
+	}()
+	// Commands such as "homeflix match" change the database while the
+	// server runs; they bump a version the server watches.
+	background.Add(1)
+	go func() {
+		defer background.Done()
+		watchCatalogVersion(ctx, db, reload, log)
 	}()
 
 	api := &jellyfin.Server{
@@ -215,6 +250,28 @@ func serve(args []string, stdout, stderr io.Writer) error {
 	}
 	log.Info("stopped")
 	return nil
+}
+
+// watchCatalogVersion reloads the catalog when another process bumped the
+// catalog version, checking every 30 seconds.
+func watchCatalogVersion(ctx context.Context, db *store.Store, reload func(), log *slog.Logger) {
+	last, _, _ := db.Setting(ctx, catalogVersionKey)
+	t := time.NewTicker(30 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			v, _, err := db.Setting(ctx, catalogVersionKey)
+			if err != nil || v == last {
+				continue
+			}
+			last = v
+			log.Info("catalog changed by another process")
+			reload()
+		}
+	}
 }
 
 // runScans scans at startup, then every interval (if positive) and

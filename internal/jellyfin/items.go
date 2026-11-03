@@ -41,9 +41,12 @@ func (s *Server) registerItems(rt *Router) {
 	for _, p := range []string{"/Items/{itemId}/Intros", "/Users/{userId}/Items/{itemId}/Intros"} {
 		rt.HandleFunc(http.MethodGet, p, s.authed(s.emptyItems))
 	}
-	for _, p := range []string{"/Genres", "/Persons", "/Studios", "/MediaSegments/{itemId}", "/Shows/NextUp"} {
+	for _, p := range []string{"/MediaSegments/{itemId}", "/Shows/NextUp"} {
 		rt.HandleFunc(http.MethodGet, p, s.authed(s.emptyItems))
 	}
+	rt.HandleFunc(http.MethodGet, "/Genres", s.authed(s.facets("genre", "Genre")))
+	rt.HandleFunc(http.MethodGet, "/Persons", s.authed(s.facets("person", "Person")))
+	rt.HandleFunc(http.MethodGet, "/Studios", s.authed(s.facets("studio", "Studio")))
 }
 
 func (s *Server) emptyItems(w http.ResponseWriter, r *http.Request, sess *Session) {
@@ -141,7 +144,7 @@ func (s *Server) viewsResult() QueryResult[BaseItemDto] {
 }
 
 // noResults reports whether the request asks only for things homeflix
-// does not have: other item types, folders, genres, people.
+// does not have: other item types, folders, tags, music.
 func noResults(r *http.Request) bool {
 	if types := listParam(r, "IncludeItemTypes"); len(types) > 0 && !containsFold(types, "Movie", "Video") {
 		return true
@@ -152,13 +155,31 @@ func noResults(r *http.Request) bool {
 	if containsFold(listParam(r, "Filters"), "IsFolder", "Dislikes") {
 		return true
 	}
-	for _, name := range []string{"Genres", "GenreIds", "PersonIds", "Person", "Studios", "StudioIds", "Tags",
-		"OfficialRatings", "ArtistIds", "AlbumArtistIds"} {
+	for _, name := range []string{"Person", "Tags", "OfficialRatings", "ArtistIds", "AlbumArtistIds"} {
 		if len(listParam(r, name)) > 0 {
 			return true
 		}
 	}
 	return false
+}
+
+// facetFilters applies the genre, person and studio parameters.
+func facetFilters(r *http.Request, q *catalog.Query) {
+	for _, g := range listParam(r, "Genres") {
+		q.GenreIDs = append(q.GenreIDs, catalog.GenreID(g))
+	}
+	for _, id := range listParam(r, "GenreIds") {
+		q.GenreIDs = append(q.GenreIDs, normalizeID(id))
+	}
+	for _, id := range listParam(r, "PersonIds") {
+		q.PersonIDs = append(q.PersonIDs, normalizeID(id))
+	}
+	for _, st := range listParam(r, "Studios") {
+		q.StudioIDs = append(q.StudioIDs, catalog.StudioID(st))
+	}
+	for _, id := range listParam(r, "StudioIds") {
+		q.StudioIDs = append(q.StudioIDs, normalizeID(id))
+	}
 }
 
 func truePtr() *bool  { t := true; return &t }
@@ -236,6 +257,7 @@ func (s *Server) getItems(w http.ResponseWriter, r *http.Request, sess *Session)
 		User:                    user,
 	}
 	playStateFilters(r, &q)
+	facetFilters(r, &q)
 	for _, o := range listParam(r, "SortOrder") {
 		q.Descending = append(q.Descending, strings.EqualFold(o, "Descending"))
 	}
@@ -280,7 +302,32 @@ func (s *Server) anyItemDto(snap *catalog.Snapshot, id string, fields fieldSet, 
 	if l, ok := snap.Library(id); ok {
 		return s.viewDto(l), true
 	}
+	if f, ok := snap.Genre(id); ok {
+		return s.facetDto(f, "Genre"), true
+	}
+	if f, ok := snap.Person(id); ok {
+		return s.facetDto(f, "Person"), true
+	}
+	if f, ok := snap.Studio(id); ok {
+		return s.facetDto(f, "Studio"), true
+	}
 	return BaseItemDto{}, false
+}
+
+// facets lists genres, people or studios, optionally of one library and
+// matching SearchTerm or NameStartsWith.
+func (s *Server) facets(kind, typ string) authedHandler {
+	return func(w http.ResponseWriter, r *http.Request, sess *Session) {
+		search := queryValue(r, "SearchTerm")
+		if search == "" {
+			search = queryValue(r, "NameStartsWith")
+		}
+		var items []BaseItemDto
+		for _, f := range s.Catalog.Snapshot().Facets(kind, normalizeID(queryValue(r, "ParentId")), search) {
+			items = append(items, s.facetDto(f, typ))
+		}
+		writeJSON(w, http.StatusOK, page(items, intParam(r, "StartIndex", 0), intParam(r, "Limit", 0)))
+	}
 }
 
 func page(items []BaseItemDto, start, limit int) QueryResult[BaseItemDto] {
@@ -380,17 +427,27 @@ func (s *Server) resumeItems(w http.ResponseWriter, r *http.Request, sess *Sessi
 }
 
 func (s *Server) itemFilters(w http.ResponseWriter, r *http.Request, sess *Session) {
-	years := s.Catalog.Snapshot().Years(normalizeID(queryValue(r, "ParentId")))
+	snap := s.Catalog.Snapshot()
+	lib := normalizeID(queryValue(r, "ParentId"))
+	years := snap.Years(lib)
 	if years == nil {
 		years = []int{}
 	}
+	genres := []string{}
+	for _, f := range snap.Facets("genre", lib, "") {
+		genres = append(genres, f.Name)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"Genres": []string{}, "Tags": []string{}, "OfficialRatings": []string{}, "Years": years,
+		"Genres": genres, "Tags": []string{}, "OfficialRatings": snap.Certifications(lib), "Years": years,
 	})
 }
 
 func (s *Server) itemFilters2(w http.ResponseWriter, r *http.Request, sess *Session) {
-	writeJSON(w, http.StatusOK, map[string]any{"Genres": []any{}, "Tags": []string{}})
+	genres := []NameIDPair{}
+	for _, f := range s.Catalog.Snapshot().Facets("genre", normalizeID(queryValue(r, "ParentId")), "") {
+		genres = append(genres, NameIDPair{Name: f.Name, ID: f.ID})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"Genres": genres, "Tags": []string{}})
 }
 
 func (s *Server) itemCounts(w http.ResponseWriter, r *http.Request, sess *Session) {
@@ -426,9 +483,24 @@ func (s *Server) ancestors(w http.ResponseWriter, r *http.Request, sess *Session
 	writeJSON(w, http.StatusOK, out)
 }
 
-// similarItems has nothing to compare by until metadata exists.
+// similarItems lists movies sharing genres with the item.
 func (s *Server) similarItems(w http.ResponseWriter, r *http.Request, sess *Session) {
-	writeJSON(w, http.StatusOK, QueryResult[BaseItemDto]{Items: []BaseItemDto{}})
+	snap := s.Catalog.Snapshot()
+	m, ok := snap.Item(normalizeID(r.PathValue("itemId")))
+	if !ok {
+		writeJSON(w, http.StatusOK, QueryResult[BaseItemDto]{Items: []BaseItemDto{}})
+		return
+	}
+	user, ok := s.userState(w, r, sess.User)
+	if !ok {
+		return
+	}
+	fields := parseFields(queryValue(r, "Fields"))
+	items := []BaseItemDto{}
+	for _, o := range snap.Similar(m, intParam(r, "Limit", 12)) {
+		items = append(items, s.itemDto(o, fields, sess, user))
+	}
+	writeJSON(w, http.StatusOK, QueryResult[BaseItemDto]{Items: items, TotalRecordCount: len(items)})
 }
 
 func (s *Server) themeMedia(w http.ResponseWriter, r *http.Request, sess *Session) {

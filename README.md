@@ -12,10 +12,11 @@ Principles:
   sources are opt-in.
 - One static binary, one SQLite database. No Docker, PostgreSQL or Redis.
 
-Status: milestone M4 of [the stage 1 plan](docs/plan-stage1.md). Clients can
+Status: milestone M5 of [the stage 1 plan](docs/plan-stage1.md). Clients can
 sign in, browse, search and play the movies directly, including alternate
 versions and movies split into parts; watch state, resume positions and
-favourites are kept per user. Metadata from TMDB (opt-in) follows in M5.
+favourites are kept per user. With a TMDB token, movies get titles,
+overviews, genres, cast, ratings and artwork.
 
 Playback is direct play only: the client receives the original file and
 decodes it. PlaybackInfo evaluates the client's device profile as Jellyfin
@@ -104,6 +105,32 @@ homeflix scan -config /usr/local/etc/homeflix.conf            # scan once
 homeflix scan -reprobe -config /usr/local/etc/homeflix.conf   # probe everything again
 homeflix stats -config /usr/local/etc/homeflix.conf           # containers, codecs, HDR, failures
 ```
+
+## Metadata from TMDB
+
+Without further configuration homeflix stays offline: titles come from the
+file names and artwork from stills of the videos. A `tmdb` block turns on
+lookups at [The Movie Database](https://www.themoviedb.org):
+
+```
+tmdb { token file "/usr/local/etc/homeflix-tmdb.token" }
+```
+
+The file holds the API Read Access Token (v4) of a free TMDB account and
+must not be readable by others. homeflix then sends TMDB, once per movie,
+the IMDb ID from the file name or the title and year, fetches the details
+and two images and keeps them in the data directory; nothing else leaves
+the host. All network access goes through `internal/outbound`, which only
+reaches the hosts it was created for; a test fails if any other code opens
+connections.
+
+```sh
+homeflix match list -config /usr/local/etc/homeflix.conf                 # movies without metadata
+homeflix match set "Heat (1995)" 949 -config /usr/local/etc/homeflix.conf # correct a match by hand
+homeflix match clear "Heat (1995)" -config /usr/local/etc/homeflix.conf   # look it up again
+```
+
+This product uses the TMDB API but is not endorsed or certified by TMDB.
 
 ## Users
 

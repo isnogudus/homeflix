@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -42,10 +43,25 @@ type Config struct {
 	// DisplayLanguage is the language of stream titles: "en" or "de".
 	DisplayLanguage string
 
+	// TMDB enables metadata from The Movie Database; nil keeps homeflix
+	// offline.
+	TMDB *TMDB
+
 	Libraries []Library
 
 	// Warnings are harmless findings, such as unused macros.
 	Warnings []string
+}
+
+// TMDB configures metadata lookups at The Movie Database.
+type TMDB struct {
+	// TokenFile holds the API Read Access Token; it must not be readable by
+	// others.
+	TokenFile string
+	// Token is the content of TokenFile.
+	Token string
+	// Language of titles and overviews, e.g. "de-DE"; English fills gaps.
+	Language string
 }
 
 // Library is one movie library made of one or more directories.
@@ -80,9 +96,9 @@ func Default() Config {
 }
 
 var keywords = []string{
-	"articles", "data", "directory", "ffmpeg", "ffprobe", "image", "interval",
+	"articles", "data", "directory", "ffmpeg", "ffprobe", "file", "image", "interval",
 	"language", "level", "library", "listen", "log", "name", "no", "on", "path",
-	"port", "probe", "scan", "server", "sort", "workers",
+	"port", "probe", "scan", "server", "sort", "tmdb", "token", "workers",
 }
 
 // Load reads the configuration file at path; "-" reads standard input. On
@@ -134,7 +150,99 @@ func parse(op *obsdconf.Parser, name string) (Config, error) {
 	for _, m := range p.UnusedMacros() {
 		p.cfg.Warnings = append(p.cfg.Warnings, fmt.Sprintf("%s: macro %s is not used", m.Pos, m.Name))
 	}
+	if t := p.cfg.TMDB; t != nil && t.Language == "" {
+		t.Language = "en-US"
+		if p.cfg.DisplayLanguage == "de" {
+			t.Language = "de-DE"
+		}
+	}
 	return p.cfg, nil
+}
+
+var tmdbLanguage = regexp.MustCompile(`^[a-z]{2}-[A-Z]{2}$`)
+
+// tmdb parses the tmdb block: token file PATH and language xx-YY.
+func (p *parser) tmdb() bool {
+	kw := p.Tok()
+	if !p.once("tmdb", kw.Pos) {
+		return false
+	}
+	p.Next()
+	t := &TMDB{}
+	errsBefore := len(p.Errors())
+	ok := p.Block("tmdb", func() bool {
+		pos := p.Tok().Pos
+		switch {
+		case p.Accept("token", "file"):
+			if !p.once("token file", pos) {
+				return false
+			}
+			path, ok := p.Text("token file")
+			if !ok {
+				return false
+			}
+			if !filepath.IsAbs(path) {
+				path = filepath.Join(p.base, path)
+			}
+			token, err := readToken(path)
+			if err != nil {
+				p.Errorf(pos, "token file: %v", err)
+				return false
+			}
+			t.TokenFile, t.Token = path, token
+			return true
+		case p.Accept("language"):
+			if !p.once("tmdb language", pos) {
+				return false
+			}
+			lt := p.Tok()
+			v, ok := p.Text("language such as de-DE")
+			if ok && !tmdbLanguage.MatchString(v) {
+				p.Errorf(lt.Pos, "language %q: want a language and country such as de-DE", v)
+				return false
+			}
+			t.Language = v
+			return ok
+		}
+		p.Errorf(p.Tok().Pos, "unknown statement %q in tmdb block", p.Tok().Text)
+		return false
+	})
+	if !ok || len(p.Errors()) > errsBefore {
+		return false
+	}
+	if t.TokenFile == "" {
+		p.Errorf(kw.Pos, `tmdb block needs "token file"`)
+		return false
+	}
+	p.cfg.TMDB = t
+	return true
+}
+
+var (
+	hexKey = regexp.MustCompile(`^[0-9a-f]{32}$`)
+	jwt    = regexp.MustCompile(`^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$`)
+)
+
+// readToken reads a TMDB API Read Access Token from a file that must be
+// private, by the rules of check_file_secrecy() in OpenBSD daemons.
+func readToken(path string) (string, error) {
+	if err := checkSecrecy(path); err != nil {
+		return "", err
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	token := strings.TrimSpace(string(b))
+	switch {
+	case token == "":
+		return "", fmt.Errorf("%s is empty", path)
+	case hexKey.MatchString(token):
+		return "", fmt.Errorf("%s holds the API key (v3); use the API Read Access Token (v4)", path)
+	case !jwt.MatchString(token):
+		return "", fmt.Errorf("%s does not hold an API Read Access Token", path)
+	}
+	return token, nil
 }
 
 // once reports an error if the setting named key was given before.
@@ -209,6 +317,10 @@ func (p *parser) statement() bool {
 		return p.once("sort articles", t.Pos)
 	case p.Is("library"):
 		return p.library()
+	case p.Is("tmdb"):
+		return p.tmdb()
+	case p.Accept("no", "tmdb"):
+		return p.once("tmdb", t.Pos)
 	case p.Is("no") && p.Peek(1).Kind == obsdconf.Word:
 		p.Errorf(t.Pos, "unknown statement %q", "no "+p.Peek(1).Text)
 		return false

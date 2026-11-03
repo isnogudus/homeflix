@@ -4,6 +4,7 @@ import (
 	"math/rand/v2"
 	"sort"
 	"strings"
+	"time"
 
 	"homeflix/internal/store"
 )
@@ -23,6 +24,9 @@ type Query struct {
 	Is4K                    *bool
 	HasSpecialFeature       *bool
 	HasTrailer              *bool
+	GenreIDs                []string // movies with any of these genres
+	PersonIDs               []string
+	StudioIDs               []string
 
 	// User is the requesting user's state by item ID, for the play state
 	// filters and sorts.
@@ -70,6 +74,9 @@ func (s *Snapshot) Movies(q Query) ([]*Movie, int) {
 			q.Is4K != nil && (m.maxHeight >= 2000) != *q.Is4K,
 			q.HasSpecialFeature != nil && m.hasExtra(false) != *q.HasSpecialFeature,
 			q.HasTrailer != nil && m.hasExtra(true) != *q.HasTrailer,
+			len(q.GenreIDs) > 0 && !anyIn(q.GenreIDs, m.genreIDs),
+			len(q.PersonIDs) > 0 && !anyIn(q.PersonIDs, m.personIDs),
+			len(q.StudioIDs) > 0 && !anyIn(q.StudioIDs, m.studioIDs),
 			q.Played != nil && q.User[m.ID].Played != *q.Played,
 			q.Favorite != nil && q.User[m.ID].IsFavorite != *q.Favorite,
 			q.Resumable != nil && (q.User[m.ID].Position > 0) != *q.Resumable,
@@ -147,8 +154,28 @@ func sortMovies(ms []*Movie, by []string, desc []bool, user map[string]store.Use
 		switch strings.ToLower(field) {
 		case "sortname", "name":
 			cmp = func(a, b *Movie) int { return strings.Compare(a.SortTitle, b.SortTitle) }
-		case "productionyear", "premieredate":
+		case "productionyear":
 			cmp = func(a, b *Movie) int { return a.Year - b.Year }
+		case "premieredate":
+			cmp = func(a, b *Movie) int {
+				if c := premiere(a).Compare(premiere(b)); c != 0 {
+					return c
+				}
+				return a.Year - b.Year
+			}
+		case "communityrating", "criticrating":
+			cmp = func(a, b *Movie) int {
+				ra, rb := rating(a), rating(b)
+				switch {
+				case ra < rb:
+					return -1
+				case ra > rb:
+					return 1
+				}
+				return 0
+			}
+		case "officialrating":
+			cmp = func(a, b *Movie) int { return strings.Compare(certification(a), certification(b)) }
 		case "datecreated":
 			cmp = func(a, b *Movie) int { return a.DateCreated.Compare(b.DateCreated) }
 		case "runtime":
@@ -183,6 +210,27 @@ func sortMovies(ms []*Movie, by []string, desc []bool, user map[string]store.Use
 		}
 		return lessByName(ms[i], ms[j])
 	})
+}
+
+func premiere(m *Movie) time.Time {
+	if m.Meta == nil {
+		return time.Time{}
+	}
+	return m.Meta.Premiere()
+}
+
+func rating(m *Movie) float64 {
+	if m.Meta == nil {
+		return 0
+	}
+	return m.Meta.Rating
+}
+
+func certification(m *Movie) string {
+	if m.Meta == nil {
+		return ""
+	}
+	return m.Meta.Certification
 }
 
 func compareInt(a, b int64) int {

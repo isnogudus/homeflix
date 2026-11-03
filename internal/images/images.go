@@ -106,22 +106,42 @@ func source(m *catalog.Movie) (catalog.Part, media.Stream, bool) {
 	return p, v, ok
 }
 
+// artwork returns the TMDB image file for a kind, if the movie has one.
+func artwork(m *catalog.Movie, kind Kind) string {
+	if m.Meta == nil || m.IsExtra() {
+		return ""
+	}
+	if kind == Primary {
+		return m.Meta.PosterFile
+	}
+	return m.Meta.BackdropFile
+}
+
 // Tag identifies the current image of a kind; it changes when the source
-// file changes, so clients may cache by it forever.
+// changes, so clients may cache by it forever.
 func Tag(m *catalog.Movie, kind Kind) string {
+	if kind == Thumb {
+		kind = Backdrop
+	}
+	if a := artwork(m, kind); a != "" {
+		sum := sha256.Sum256([]byte("tmdb|" + filepath.Base(a) + "|" + string(kind)))
+		return hex.EncodeToString(sum[:8])
+	}
+	return frameTag(m, kind)
+}
+
+// frameTag identifies an image made from the movie's still.
+func frameTag(m *catalog.Movie, kind Kind) string {
 	p, _, ok := source(m)
 	if !ok {
 		return ""
-	}
-	if kind == Thumb {
-		kind = Backdrop
 	}
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%s|%d|%d|%s|v2", p.File.ID, p.File.Size, p.File.ModTime.UnixMilli(), kind)))
 	return hex.EncodeToString(sum[:8])
 }
 
-// stillTag names the still all images of a movie are made from.
-func stillTag(m *catalog.Movie) string { return Tag(m, Backdrop) }
+// stillTag names the still images without artwork are made from.
+func stillTag(m *catalog.Movie) string { return frameTag(m, Backdrop) }
 
 // AspectRatio is width over height of the primary image.
 func AspectRatio(m *catalog.Movie) float64 {
@@ -299,14 +319,21 @@ func writeJPEG(path string, img image.Image, quality int) error {
 	return os.Rename(tmp, path)
 }
 
-// Get returns a JPEG file for the requested image, extracting, cutting
-// and scaling as needed.
+// Get returns a JPEG file for the requested image: TMDB artwork if there
+// is some, else made from the still, cut and scaled as needed.
 func (s *Service) Get(ctx context.Context, m *catalog.Movie, kind Kind, size Size) (string, error) {
-	still, err := s.still(ctx, m)
-	if err != nil {
-		return "", err
+	if kind == Thumb {
+		kind = Backdrop
 	}
-	poster := kind == Primary && !m.IsExtra()
+	src := artwork(m, kind)
+	poster := false
+	if src == "" {
+		still, err := s.still(ctx, m)
+		if err != nil {
+			return "", err
+		}
+		src, poster = still, kind == Primary && !m.IsExtra()
+	}
 	q := size.Quality
 	if q <= 0 || q > 100 {
 		q = 90
@@ -314,11 +341,11 @@ func (s *Service) Get(ctx context.Context, m *catalog.Movie, kind Kind, size Siz
 	variant := fmt.Sprintf("%t-%d-%d-%d-%d-%d-%d-%d", poster, size.MaxWidth, size.MaxHeight,
 		size.Width, size.Height, size.FillWidth, size.FillHeight, q)
 	sum := sha256.Sum256([]byte(variant))
-	path := filepath.Join(s.Dir, "scaled", stillTag(m), hex.EncodeToString(sum[:12])+".jpg")
+	path := filepath.Join(s.Dir, "scaled", Tag(m, kind), hex.EncodeToString(sum[:12])+".jpg")
 	if _, err := os.Stat(path); err == nil {
 		return path, nil
 	}
-	img, err := decodeFile(still)
+	img, err := decodeFile(src)
 	if err != nil {
 		return "", err
 	}
@@ -404,11 +431,19 @@ func (s *Service) Warm(ctx context.Context, movies []*catalog.Movie) {
 	wanted := map[string]bool{}
 	var todo []*catalog.Movie
 	consider := func(m *catalog.Movie) {
+		for _, k := range []Kind{Primary, Backdrop} {
+			if t := Tag(m, k); t != "" {
+				wanted[t] = true
+			}
+		}
 		tag := stillTag(m)
 		if tag == "" {
 			return
 		}
 		wanted[tag] = true
+		if artwork(m, Primary) != "" && artwork(m, Backdrop) != "" {
+			return
+		}
 		if _, err := os.Stat(s.stillPath(tag)); err != nil {
 			todo = append(todo, m)
 		}

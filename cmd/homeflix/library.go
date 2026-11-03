@@ -57,7 +57,13 @@ func scanCommand(args []string, cio cliIO) error {
 	}
 	rep, err := newScanner(cfg, db, log).Scan(ctx)
 	printReport(cio.stdout, rep)
-	return err
+	if err != nil {
+		return err
+	}
+	if rep.Changed() {
+		return bumpCatalog(ctx, db)
+	}
+	return nil
 }
 
 func printReport(w io.Writer, rep library.Report) {

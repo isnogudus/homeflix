@@ -57,7 +57,7 @@ func libraryServer(t *testing.T) (*Server, *apiClient, *apiClient) {
 			SortTitle: "00000012 years a slave", Year: 2013, DateCreated: day(2), Path: "/m/12 Years a Slave (2013).mp4",
 			Files: []store.MediaFile{f("fc", "c0000000000000000000000000000001", "", "/m/12 Years a Slave (2013).mp4", fixture(t, "twelve-years"))}},
 	}
-	s.Catalog.Set(catalog.Build([]store.Library{{ID: libID, Name: "Filme", CollectionType: "movies"}}, items, "en", nil))
+	s.Catalog.Set(catalog.Build([]store.Library{{ID: libID, Name: "Filme", CollectionType: "movies"}}, items, catalog.Options{Locale: "en"}))
 	h := s.Handler()
 	addUser(t, s, "admin", "a", true)
 	addUser(t, s, "anna", "b", false)

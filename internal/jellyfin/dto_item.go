@@ -35,9 +35,12 @@ type BaseItemDto struct {
 	IsFolder                bool                         `json:"IsFolder"`
 	ParentID                string                       `json:"ParentId,omitempty"`
 	Type                    string                       `json:"Type"`
-	People                  []any                        `json:"People"`
-	Studios                 []any                        `json:"Studios"`
-	GenreItems              []any                        `json:"GenreItems"`
+	People                  []PersonDto                  `json:"People"`
+	Studios                 []NameIDPair                 `json:"Studios"`
+	GenreItems              []NameIDPair                 `json:"GenreItems"`
+	CommunityRating         *float64                     `json:"CommunityRating,omitempty"`
+	OfficialRating          string                       `json:"OfficialRating,omitempty"`
+	PremiereDate            *time.Time                   `json:"PremiereDate,omitempty"`
 	LocalTrailerCount       int                          `json:"LocalTrailerCount"`
 	UserData                UserItemDataDto              `json:"UserData"`
 	ChildCount              *int                         `json:"ChildCount,omitempty"`
@@ -61,6 +64,20 @@ type BaseItemDto struct {
 	Height                  int                          `json:"Height,omitempty"`
 	RemoteTrailers          []any                        `json:"RemoteTrailers"`
 	PlayAccess              string                       `json:"PlayAccess"`
+}
+
+// NameIDPair names a genre or studio.
+type NameIDPair struct {
+	Name string `json:"Name"`
+	ID   string `json:"Id"`
+}
+
+// PersonDto is a member of cast or crew.
+type PersonDto struct {
+	Name string `json:"Name"`
+	ID   string `json:"Id"`
+	Role string `json:"Role,omitempty"`
+	Type string `json:"Type"`
 }
 
 // ExternalURL is a link shown by clients; the server never fetches it.
@@ -334,9 +351,9 @@ func (s *Server) baseDto(m *catalog.Movie, id string) BaseItemDto {
 		ProviderIDs:       map[string]string{},
 		ParentID:          m.LibraryID,
 		Type:              m.Type,
-		People:            []any{},
-		Studios:           []any{},
-		GenreItems:        []any{},
+		People:            []PersonDto{},
+		Studios:           []NameIDPair{},
+		GenreItems:        []NameIDPair{},
 		Tags:              []string{},
 		VideoType:         "VideoFile",
 		ImageTags:         map[string]string{},
@@ -357,7 +374,9 @@ func (s *Server) baseDto(m *catalog.Movie, id string) BaseItemDto {
 	}
 	if m.TMDbID != "" {
 		d.ProviderIDs["Tmdb"] = m.TMDbID
+		d.ExternalUrls = append(d.ExternalUrls, ExternalURL{Name: "TMDB", URL: "https://www.themoviedb.org/movie/" + m.TMDbID})
 	}
+	d.Name = m.Name()
 	if tag := images.Tag(m, images.Primary); tag != "" {
 		d.ImageTags[string(images.Primary)] = tag
 		d.PrimaryImageAspectRatio = images.AspectRatio(m)
@@ -368,6 +387,45 @@ func (s *Server) baseDto(m *catalog.Movie, id string) BaseItemDto {
 		}
 	}
 	return d
+}
+
+// describeMeta adds what TMDB knows; fields gates the larger parts.
+func describeMeta(d *BaseItemDto, m *catalog.Movie, fields fieldSet) {
+	meta := m.Meta
+	if meta == nil {
+		return
+	}
+	if meta.OriginalTitle != "" && meta.OriginalTitle != d.Name {
+		d.OriginalTitle = meta.OriginalTitle
+	}
+	if fields.has("Overview") {
+		d.Overview = meta.Overview
+	}
+	if fields.has("Taglines") && meta.Tagline != "" {
+		d.Taglines = []string{meta.Tagline}
+	}
+	if fields.has("Genres") {
+		d.Genres = append([]string{}, meta.Genres...)
+		for _, g := range meta.Genres {
+			d.GenreItems = append(d.GenreItems, NameIDPair{Name: g, ID: catalog.GenreID(g)})
+		}
+	}
+	if fields.has("People") {
+		for _, p := range meta.People {
+			d.People = append(d.People, PersonDto{Name: p.Name, ID: catalog.PersonID(p.ID), Role: p.Role, Type: p.Type})
+		}
+	}
+	if fields.has("Studios") {
+		for _, st := range meta.Studios {
+			d.Studios = append(d.Studios, NameIDPair{Name: st, ID: catalog.StudioID(st)})
+		}
+	}
+	if meta.Rating > 0 {
+		r := meta.Rating
+		d.CommunityRating = &r
+	}
+	d.OfficialRating = meta.Certification
+	d.PremiereDate = timePtr(meta.Premiere())
 }
 
 func describeFile(d *BaseItemDto, info media.Info) {
@@ -389,6 +447,7 @@ func describeFile(d *BaseItemDto, info media.Info) {
 // for single-item requests. user holds the requesting user's state.
 func (s *Server) itemDto(m *catalog.Movie, fields fieldSet, sess *Session, user map[string]store.UserData) BaseItemDto {
 	d := s.baseDto(m, m.ID)
+	describeMeta(&d, m, fields)
 	d.UserData = userDataDto(m.ID, user[m.ID], runtimeOf(m))
 	for _, x := range m.Extras {
 		if x.ExtraType == "Trailer" {
@@ -432,7 +491,8 @@ func (s *Server) partDto(r catalog.PartRef, fields fieldSet, sess *Session, user
 	part := r.Part()
 	id := part.File.ID
 	d := s.baseDto(r.Movie, id)
-	d.Name = r.Movie.Title + " – " + s.Catalog.Locale.PartName(r.Index+1)
+	describeMeta(&d, r.Movie, fields)
+	d.Name = r.Movie.Name() + " – " + s.Catalog.Locale.PartName(r.Index+1)
 	d.UserData = userDataDto(id, user[id], part.Info.Duration)
 	describeFile(&d, part.Info)
 	showPath := sess.User.IsAdmin && fields.has("Path")
@@ -451,6 +511,36 @@ func (s *Server) partDto(r catalog.PartRef, fields fieldSet, sess *Session, user
 	return d
 }
 
+// facetDto describes a genre, person or studio as an item of its own.
+func (s *Server) facetDto(f *catalog.Facet, typ string) BaseItemDto {
+	n := f.Movies
+	return BaseItemDto{
+		Name:              f.Name,
+		ServerID:          s.ServerID,
+		ID:                f.ID,
+		SortName:          strings.ToLower(f.Name),
+		ExternalUrls:      []ExternalURL{},
+		Taglines:          []string{},
+		Genres:            []string{},
+		ProviderIDs:       map[string]string{},
+		IsFolder:          true,
+		Type:              typ,
+		People:            []PersonDto{},
+		Studios:           []NameIDPair{},
+		GenreItems:        []NameIDPair{},
+		UserData:          UserItemDataDto{Key: f.ID, ItemID: f.ID},
+		ChildCount:        &n,
+		Tags:              []string{},
+		ImageTags:         map[string]string{},
+		BackdropImageTags: []string{},
+		ImageBlurHashes:   map[string]map[string]string{},
+		LocationType:      "Virtual",
+		MediaType:         "Unknown",
+		RemoteTrailers:    []any{},
+		PlayAccess:        "Full",
+	}
+}
+
 // viewDto describes a library as a collection folder.
 func (s *Server) viewDto(l catalog.Library) BaseItemDto {
 	n := l.Movies
@@ -465,9 +555,9 @@ func (s *Server) viewDto(l catalog.Library) BaseItemDto {
 		ProviderIDs:          map[string]string{},
 		IsFolder:             true,
 		Type:                 "CollectionFolder",
-		People:               []any{},
-		Studios:              []any{},
-		GenreItems:           []any{},
+		People:               []PersonDto{},
+		Studios:              []NameIDPair{},
+		GenreItems:           []NameIDPair{},
 		UserData:             UserItemDataDto{Key: l.ID, ItemID: l.ID},
 		ChildCount:           &n,
 		DisplayPreferencesID: l.ID,

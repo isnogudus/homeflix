@@ -42,7 +42,7 @@ func testSnapshot() *Snapshot {
 		{ID: "x1", LibraryID: "lib", ParentID: "m1", Type: "Video", ExtraType: "BehindTheScenes", Title: "Making of",
 			SortTitle: "making of", Files: []store.MediaFile{{ID: "f7", ItemID: "x1", Probe: probe(720, false, "eng")}}},
 	}
-	return Build([]store.Library{{ID: "lib", Name: "Filme", CollectionType: "movies"}}, items, "en", nil)
+	return Build([]store.Library{{ID: "lib", Name: "Filme", CollectionType: "movies"}}, items, Options{Locale: "en"})
 }
 
 func titles(ms []*Movie) string {

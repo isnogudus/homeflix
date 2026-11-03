@@ -19,6 +19,14 @@
 #scan interval 6h		# or: no scan interval
 #sort articles { the a an }	# or: no sort articles
 
+# Metadata and artwork from The Movie Database. Without this block homeflix
+# makes no network connections. The token file holds the API Read Access
+# Token (v4) and must not be readable by others (mode 0600 or 0640).
+#tmdb {
+#	token file "/usr/local/etc/homeflix-tmdb.token"
+#	language de-DE
+#}
+
 # A movie is a single file, a set of "part1", "part2" files, or a folder
 # named "Title (Year)" holding versions, parts and extras folders such as
 # "behind the scenes" or "trailers". Movies that disappear are kept for

@@ -4,6 +4,7 @@ import (
 	"context"
 	"image"
 	"image/color"
+	"image/jpeg"
 	"image/png"
 	"os"
 	"path/filepath"
@@ -105,7 +106,7 @@ func testMovie(extra bool) *catalog.Movie {
 		items = append(items, store.Item{ID: "x1", LibraryID: "lib", ParentID: "m1", Type: "Video", Title: "X", SortTitle: "x",
 			Files: []store.MediaFile{{ID: "f2", ItemID: "x1", Path: "/m/X.mkv", Size: 5, Probe: probe}}})
 	}
-	snap := catalog.Build(nil, items, "en", nil)
+	snap := catalog.Build(nil, items, catalog.Options{Locale: "en"})
 	id := "m1"
 	if extra {
 		id = "x1"
@@ -214,5 +215,30 @@ func TestExtractionFailure(t *testing.T) {
 	_, err := s.Get(context.Background(), testMovie(false), Primary, Size{})
 	if err == nil || !strings.Contains(err.Error(), "Invalid data found") {
 		t.Errorf("err = %v", err)
+	}
+}
+
+func TestArtworkFromTMDBNeedsNoFFmpeg(t *testing.T) {
+	dir := t.TempDir()
+	poster := filepath.Join(dir, "1-poster-p.jpg")
+	f, _ := os.Create(poster)
+	jpeg.Encode(f, image.NewRGBA(image.Rect(0, 0, 500, 750)), nil)
+	f.Close()
+	m := testMovie(false)
+	m.Meta = &catalog.Meta{PosterFile: poster}
+	s := &Service{FFmpeg: "/nonexistent/ffmpeg", Dir: filepath.Join(dir, "cache"), Workers: 1}
+	p, err := s.Get(context.Background(), m, Primary, Size{MaxHeight: 300})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if img, _ := decodeFile(p); img.Bounds().Dx() != 200 || img.Bounds().Dy() != 300 {
+		t.Errorf("poster %v, want 200x300", img.Bounds())
+	}
+	frame := frameTag(m, Primary)
+	if Tag(m, Primary) == frame || Tag(m, Backdrop) != frameTag(m, Backdrop) {
+		t.Error("tags do not follow the image source")
+	}
+	if _, err := s.Get(context.Background(), m, Backdrop, Size{}); err == nil {
+		t.Error("backdrop without artwork and without ffmpeg succeeded")
 	}
 }

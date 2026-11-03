@@ -52,7 +52,7 @@ func playbackServer(t *testing.T) (*Server, *apiClient, map[string][]byte) {
 			}},
 	}
 	s.Catalog.Locale = "de"
-	s.Catalog.Set(catalog.Build([]store.Library{{ID: libID, Name: "Filme", CollectionType: "movies"}}, items, "de", nil))
+	s.Catalog.Set(catalog.Build([]store.Library{{ID: libID, Name: "Filme", CollectionType: "movies"}}, items, catalog.Options{Locale: "de"}))
 	addUser(t, s, "anna", "pw", false)
 	c := &apiClient{t: t, h: s.Handler()}
 	login(t, c, "anna", "pw")

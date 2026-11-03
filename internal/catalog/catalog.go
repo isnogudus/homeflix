@@ -51,7 +51,13 @@ type Movie struct {
 	Extras   []*Movie
 	Parent   *Movie // set for extras
 
+	// Meta is what TMDB knows about the movie; nil if nothing.
+	Meta *Meta
+
 	searchKey     string
+	genreIDs      map[string]bool
+	personIDs     map[string]bool
+	studioIDs     map[string]bool
 	maxHeight     int
 	hasSubtitles  bool
 	audioLangs    map[string]bool
@@ -94,14 +100,20 @@ type Snapshot struct {
 	sources   map[string]*Version
 	sourceOf  map[*Version]*Movie
 	parts     map[string]PartRef // by file ID
+	genres    map[string]*Facet
+	people    map[string]*Facet
+	studios   map[string]*Facet
 	BuiltAt   time.Time
 }
 
 // Catalog holds the current snapshot.
 type Catalog struct {
-	Store  *store.Store
-	Locale media.Locale
-	Log    *slog.Logger
+	Store    *store.Store
+	Locale   media.Locale
+	Articles []string // leading words ignored when sorting TMDB titles
+	// MetadataDir holds artwork fetched from TMDB.
+	MetadataDir string
+	Log         *slog.Logger
 
 	snap atomic.Pointer[Snapshot]
 }
@@ -115,8 +127,7 @@ func (c *Catalog) Snapshot() *Snapshot {
 	return emptySnapshot
 }
 
-var emptySnapshot = &Snapshot{byID: map[string]*Movie{}, sources: map[string]*Version{},
-	sourceOf: map[*Version]*Movie{}, parts: map[string]PartRef{}}
+var emptySnapshot = Build(nil, nil, Options{})
 
 // Reload rebuilds the snapshot from the database.
 func (c *Catalog) Reload(ctx context.Context) error {
@@ -129,7 +140,12 @@ func (c *Catalog) Reload(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	snap := Build(libs, items, c.Locale, c.Log)
+	meta, err := c.Store.AllMetadata(ctx)
+	if err != nil {
+		return err
+	}
+	snap := Build(libs, items, Options{Locale: c.Locale, Articles: c.Articles, Metadata: meta,
+		MetadataDir: c.MetadataDir, Log: c.Log})
 	c.Set(snap)
 	if c.Log != nil {
 		c.Log.Info("catalog loaded", "movies", len(snap.movies), "took", time.Since(start).Round(time.Millisecond))
@@ -143,22 +159,38 @@ func (c *Catalog) Set(s *Snapshot) {
 	c.snap.Store(s)
 }
 
+// Options control how a snapshot is built.
+type Options struct {
+	Locale      media.Locale
+	Articles    []string
+	Metadata    map[string]store.Metadata // by item ID
+	MetadataDir string
+	Log         *slog.Logger
+}
+
 // Build assembles a snapshot. Probe data that cannot be parsed is logged and
 // treated as missing.
-func Build(libs []store.Library, items []store.Item, loc media.Locale, log *slog.Logger) *Snapshot {
+func Build(libs []store.Library, items []store.Item, opt Options) *Snapshot {
 	s := &Snapshot{
 		byID:     map[string]*Movie{},
 		sources:  map[string]*Version{},
 		sourceOf: map[*Version]*Movie{},
 		parts:    map[string]PartRef{},
+		genres:   map[string]*Facet{},
+		people:   map[string]*Facet{},
+		studios:  map[string]*Facet{},
 	}
 	counts := map[string]int{}
 	var extras []*Movie
 	for _, it := range items {
 		m := &Movie{Item: it}
 		m.Files = nil
-		m.Versions = buildVersions(it, loc, log)
+		m.Versions = buildVersions(it, opt.Locale, opt.Log)
+		if md, ok := opt.Metadata[it.ID]; ok && it.ParentID == "" {
+			m.applyMeta(md, opt)
+		}
 		m.analyse()
+		s.index(m)
 		s.byID[m.ID] = m
 		if it.ParentID != "" {
 			extras = append(extras, m)
@@ -260,6 +292,9 @@ func height(v *Version) int {
 
 func (m *Movie) analyse() {
 	m.searchKey = SearchKey(m.Title)
+	if m.Meta != nil {
+		m.searchKey += " | " + SearchKey(m.Meta.Title) + " | " + SearchKey(m.Meta.OriginalTitle)
+	}
 	m.audioLangs, m.subtitleLangs = map[string]bool{}, map[string]bool{}
 	for _, v := range m.Versions {
 		for _, s := range v.Info().Streams {
