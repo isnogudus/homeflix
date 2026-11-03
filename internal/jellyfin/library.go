@@ -10,18 +10,7 @@ type QueryResult[T any] struct {
 }
 
 func (s *Server) registerLibrary(rt *Router) {
-	// Resume and next-up lists need playback state, which arrives in M4.
-	for _, p := range []string{"/UserItems/Resume", "/Users/{userId}/Items/Resume", "/Shows/NextUp"} {
-		rt.HandleFunc(http.MethodGet, p, s.authed(s.emptyQueryResult))
-	}
 	rt.HandleFunc(http.MethodPost, "/Library/Refresh", s.authed(s.refreshLibrary))
-}
-
-func (s *Server) emptyQueryResult(w http.ResponseWriter, r *http.Request, sess *Session) {
-	if _, ok := s.targetUser(w, r, sess); !ok {
-		return
-	}
-	writeJSON(w, http.StatusOK, QueryResult[struct{}]{Items: []struct{}{}})
 }
 
 // refreshLibrary starts a scan of all libraries. Administrators only.

@@ -4,6 +4,7 @@ package jellyfin
 
 import (
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
@@ -53,6 +54,8 @@ func (s *Server) Handler() http.Handler {
 	s.registerLibrary(rt)
 	s.registerItems(rt)
 	s.registerImages(rt)
+	s.registerPlayback(rt)
+	s.registerUserData(rt)
 	return s.recoverPanics(s.logRequests(rt))
 }
 
@@ -96,6 +99,23 @@ func (w *statusRecorder) Write(b []byte) (int, error) {
 }
 
 func (w *statusRecorder) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+// ReadFrom keeps the underlying writer's ReadFrom reachable, so files are
+// sent with sendfile(2) instead of being copied through user space.
+func (w *statusRecorder) ReadFrom(r io.Reader) (int64, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	var n int64
+	var err error
+	if rf, ok := w.ResponseWriter.(io.ReaderFrom); ok {
+		n, err = rf.ReadFrom(r)
+	} else {
+		n, err = io.Copy(w.ResponseWriter, r)
+	}
+	w.bytes += n
+	return n, err
+}
 
 // logRequests logs every request at debug level. The query string is left
 // out because clients put access tokens there.

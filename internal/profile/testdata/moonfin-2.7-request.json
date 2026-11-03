@@ -1,0 +1,6 @@
+{"AudioStreamIndex":2,"SubtitleStreamIndex":-1,"DeviceProfile":{"MaxStreamingBitrate":120000000,
+ "DirectPlayProfiles":[{"Type":"Video","Container":"asf,dash,hls,m4v,mkv,mov,mp4,mpegts,ogm,ogv,ts,vob,webm,wmv,xvid","VideoCodec":"av1,h264,hevc,mpeg,mpeg2video,mpeg4,vc1,vp8,vp9","AudioCodec":"aac,aac_latm,ac3,alac,dca,dts,eac3,flac,mlp,mp2,mp3,opus,pcm_s16le,pcm_s24le,truehd,vorbis"}],
+ "TranscodingProfiles":[
+  {"Type":"Video","Context":"Streaming","Container":"mp4","Protocol":"hls","VideoCodec":"h264,hevc","AudioCodec":"aac,ac3,eac3,alac,flac,opus","CopyTimestamps":false},
+  {"Type":"Video","Context":"Streaming","Container":"ts","Protocol":"hls","VideoCodec":"h264","AudioCodec":"aac,ac3,eac3","CopyTimestamps":false}],
+ "CodecProfiles":[{"Type":"Video","Codec":"h264","Conditions":[{"Condition":"LessThanEqual","Property":"RefFrames","Value":"4","IsRequired":false}],"ApplyConditions":[{"Condition":"GreaterThanEqual","Property":"Width","Value":"1900","IsRequired":false}]}]}}

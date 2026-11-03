@@ -1,11 +1,13 @@
 package jellyfin
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"homeflix/internal/catalog"
+	"homeflix/internal/store"
 )
 
 func (s *Server) registerItems(rt *Router) {
@@ -20,6 +22,9 @@ func (s *Server) registerItems(rt *Router) {
 	}
 	for _, p := range []string{"/Items/Latest", "/Users/{userId}/Items/Latest"} {
 		rt.HandleFunc(http.MethodGet, p, s.authed(s.latestItems))
+	}
+	for _, p := range []string{"/UserItems/Resume", "/Users/{userId}/Items/Resume"} {
+		rt.HandleFunc(http.MethodGet, p, s.authed(s.resumeItems))
 	}
 	rt.HandleFunc(http.MethodGet, "/Items/Filters", s.authed(s.itemFilters))
 	rt.HandleFunc(http.MethodGet, "/Items/Filters2", s.authed(s.itemFilters2))
@@ -36,7 +41,7 @@ func (s *Server) registerItems(rt *Router) {
 	for _, p := range []string{"/Items/{itemId}/Intros", "/Users/{userId}/Items/{itemId}/Intros"} {
 		rt.HandleFunc(http.MethodGet, p, s.authed(s.emptyItems))
 	}
-	for _, p := range []string{"/Genres", "/Persons", "/Studios", "/MediaSegments/{itemId}"} {
+	for _, p := range []string{"/Genres", "/Persons", "/Studios", "/MediaSegments/{itemId}", "/Shows/NextUp"} {
 		rt.HandleFunc(http.MethodGet, p, s.authed(s.emptyItems))
 	}
 }
@@ -94,6 +99,30 @@ func containsFold(list []string, want ...string) bool {
 	return false
 }
 
+// userState loads the play state of the user a request is about. It
+// writes an error response and returns false on failure.
+func (s *Server) userState(w http.ResponseWriter, r *http.Request, u store.User) (map[string]store.UserData, bool) {
+	ud, err := s.Store.AllUserData(r.Context(), u.ID)
+	if err != nil {
+		s.internalError(w, r, err)
+		return nil, false
+	}
+	return ud, true
+}
+
+// userConfigBool reads a boolean from the user's client configuration.
+func userConfigBool(u store.User, key string, def bool) bool {
+	var cfg map[string]json.RawMessage
+	if json.Unmarshal([]byte(u.Configuration), &cfg) != nil {
+		return def
+	}
+	var v bool
+	if raw, ok := cfg[key]; ok && json.Unmarshal(raw, &v) == nil {
+		return v
+	}
+	return def
+}
+
 func (s *Server) userViews(w http.ResponseWriter, r *http.Request, sess *Session) {
 	if _, ok := s.targetUser(w, r, sess); !ok {
 		return
@@ -112,7 +141,7 @@ func (s *Server) viewsResult() QueryResult[BaseItemDto] {
 }
 
 // noResults reports whether the request asks only for things homeflix
-// does not have: other item types, play state, favourites, genres, people.
+// does not have: other item types, folders, genres, people.
 func noResults(r *http.Request) bool {
 	if types := listParam(r, "IncludeItemTypes"); len(types) > 0 && !containsFold(types, "Movie", "Video") {
 		return true
@@ -120,13 +149,7 @@ func noResults(r *http.Request) bool {
 	if containsFold(listParam(r, "ExcludeItemTypes"), "Movie") {
 		return true
 	}
-	if containsFold(listParam(r, "Filters"), "IsFavorite", "IsPlayed", "IsResumable", "Likes", "IsFavoriteOrLikes", "IsFolder") {
-		return true
-	}
-	if p := boolParam(r, "IsFavorite"); p != nil && *p {
-		return true
-	}
-	if p := boolParam(r, "IsPlayed"); p != nil && *p {
+	if containsFold(listParam(r, "Filters"), "IsFolder", "Dislikes") {
 		return true
 	}
 	for _, name := range []string{"Genres", "GenreIds", "PersonIds", "Person", "Studios", "StudioIds", "Tags",
@@ -138,8 +161,38 @@ func noResults(r *http.Request) bool {
 	return false
 }
 
+func truePtr() *bool  { t := true; return &t }
+func falsePtr() *bool { f := false; return &f }
+
+// playStateFilters applies the Filters, IsPlayed and IsFavorite parameters.
+func playStateFilters(r *http.Request, q *catalog.Query) {
+	for _, f := range listParam(r, "Filters") {
+		switch strings.ToLower(f) {
+		case "isplayed":
+			q.Played = truePtr()
+		case "isunplayed":
+			q.Played = falsePtr()
+		case "isfavorite", "likes", "isfavoriteorlikes":
+			q.Favorite = truePtr()
+		case "isresumable":
+			q.Resumable = truePtr()
+		}
+	}
+	if p := boolParam(r, "IsPlayed"); p != nil {
+		q.Played = p
+	}
+	if p := boolParam(r, "IsFavorite"); p != nil {
+		q.Favorite = p
+	}
+}
+
 func (s *Server) getItems(w http.ResponseWriter, r *http.Request, sess *Session) {
-	if _, ok := s.targetUser(w, r, sess); !ok {
+	u, ok := s.targetUser(w, r, sess)
+	if !ok {
+		return
+	}
+	user, ok := s.userState(w, r, u)
+	if !ok {
 		return
 	}
 	snap := s.Catalog.Snapshot()
@@ -150,11 +203,8 @@ func (s *Server) getItems(w http.ResponseWriter, r *http.Request, sess *Session)
 	if ids := listParam(r, "Ids"); len(ids) > 0 {
 		var items []BaseItemDto
 		for _, id := range ids {
-			id = normalizeID(id)
-			if m, ok := snap.Item(id); ok {
-				items = append(items, s.itemDto(m, fields, sess))
-			} else if l, ok := snap.Library(id); ok {
-				items = append(items, s.viewDto(l))
+			if d, ok := s.anyItemDto(snap, normalizeID(id), fields, sess, user); ok {
+				items = append(items, d)
 			}
 		}
 		writeJSON(w, http.StatusOK, page(items, start, limit))
@@ -183,7 +233,9 @@ func (s *Server) getItems(w http.ResponseWriter, r *http.Request, sess *Session)
 		SortBy:                  listParam(r, "SortBy"),
 		StartIndex:              start,
 		Limit:                   limit,
+		User:                    user,
 	}
+	playStateFilters(r, &q)
 	for _, o := range listParam(r, "SortOrder") {
 		q.Descending = append(q.Descending, strings.EqualFold(o, "Descending"))
 	}
@@ -211,9 +263,24 @@ func (s *Server) getItems(w http.ResponseWriter, r *http.Request, sess *Session)
 	movies, total := snap.Movies(q)
 	out := QueryResult[BaseItemDto]{Items: make([]BaseItemDto, 0, len(movies)), TotalRecordCount: total, StartIndex: start}
 	for _, m := range movies {
-		out.Items = append(out.Items, s.itemDto(m, fields, sess))
+		out.Items = append(out.Items, s.itemDto(m, fields, sess, user))
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// anyItemDto describes a movie, extra, part or library by ID.
+func (s *Server) anyItemDto(snap *catalog.Snapshot, id string, fields fieldSet, sess *Session,
+	user map[string]store.UserData) (BaseItemDto, bool) {
+	if m, ok := snap.Item(id); ok {
+		return s.itemDto(m, fields, sess, user), true
+	}
+	if p, ok := snap.Part(id); ok && p.Index > 0 {
+		return s.partDto(p, fields, sess, user), true
+	}
+	if l, ok := snap.Library(id); ok {
+		return s.viewDto(l), true
+	}
+	return BaseItemDto{}, false
 }
 
 func page(items []BaseItemDto, start, limit int) QueryResult[BaseItemDto] {
@@ -230,24 +297,29 @@ func page(items []BaseItemDto, start, limit int) QueryResult[BaseItemDto] {
 }
 
 func (s *Server) getItem(w http.ResponseWriter, r *http.Request, sess *Session) {
-	if _, ok := s.targetUser(w, r, sess); !ok {
+	u, ok := s.targetUser(w, r, sess)
+	if !ok {
 		return
 	}
-	snap := s.Catalog.Snapshot()
-	id := normalizeID(r.PathValue("itemId"))
-	if m, ok := snap.Item(id); ok {
-		writeJSON(w, http.StatusOK, s.itemDto(m, nil, sess))
+	user, ok := s.userState(w, r, u)
+	if !ok {
 		return
 	}
-	if l, ok := snap.Library(id); ok {
-		writeJSON(w, http.StatusOK, s.viewDto(l))
+	d, ok := s.anyItemDto(s.Catalog.Snapshot(), normalizeID(r.PathValue("itemId")), nil, sess, user)
+	if !ok {
+		http.NotFound(w, r)
 		return
 	}
-	http.NotFound(w, r)
+	writeJSON(w, http.StatusOK, d)
 }
 
 func (s *Server) latestItems(w http.ResponseWriter, r *http.Request, sess *Session) {
-	if _, ok := s.targetUser(w, r, sess); !ok {
+	u, ok := s.targetUser(w, r, sess)
+	if !ok {
+		return
+	}
+	user, ok := s.userState(w, r, u)
+	if !ok {
 		return
 	}
 	snap := s.Catalog.Snapshot()
@@ -263,11 +335,48 @@ func (s *Server) latestItems(w http.ResponseWriter, r *http.Request, sess *Sessi
 		writeJSON(w, http.StatusOK, out)
 		return
 	}
+	q := catalog.Query{LibraryID: parent, SortBy: []string{"DateCreated"}, Descending: []bool{true},
+		Limit: intParam(r, "Limit", 20), User: user}
+	if userConfigBool(u, "HidePlayedInLatest", true) {
+		q.Played = falsePtr()
+	}
+	if p := boolParam(r, "IsPlayed"); p != nil {
+		q.Played = p
+	}
+	movies, _ := snap.Movies(q)
 	fields := parseFields(queryValue(r, "Fields"))
-	for _, m := range snap.Latest(parent, intParam(r, "Limit", 20)) {
-		out = append(out, s.itemDto(m, fields, sess))
+	for _, m := range movies {
+		out = append(out, s.itemDto(m, fields, sess, user))
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// resumeItems lists movies and parts the user started and did not finish.
+func (s *Server) resumeItems(w http.ResponseWriter, r *http.Request, sess *Session) {
+	u, ok := s.targetUser(w, r, sess)
+	if !ok {
+		return
+	}
+	user, ok := s.userState(w, r, u)
+	if !ok {
+		return
+	}
+	start, limit := intParam(r, "StartIndex", 0), intParam(r, "Limit", 0)
+	if noResults(r) {
+		writeJSON(w, http.StatusOK, QueryResult[BaseItemDto]{Items: []BaseItemDto{}, StartIndex: start})
+		return
+	}
+	snap := s.Catalog.Snapshot()
+	fields := parseFields(queryValue(r, "Fields"))
+	var items []BaseItemDto
+	for _, res := range snap.Resume(user, normalizeID(queryValue(r, "ParentId")), 0) {
+		if res.Index == 0 {
+			items = append(items, s.itemDto(res.Movie, fields, sess, user))
+		} else {
+			items = append(items, s.partDto(res.PartRef, fields, sess, user))
+		}
+	}
+	writeJSON(w, http.StatusOK, page(items, start, limit))
 }
 
 func (s *Server) itemFilters(w http.ResponseWriter, r *http.Request, sess *Session) {
@@ -297,14 +406,19 @@ func (s *Server) itemCounts(w http.ResponseWriter, r *http.Request, sess *Sessio
 
 func (s *Server) ancestors(w http.ResponseWriter, r *http.Request, sess *Session) {
 	snap := s.Catalog.Snapshot()
-	m, ok := snap.Item(normalizeID(r.PathValue("itemId")))
+	id := normalizeID(r.PathValue("itemId"))
+	m, ok := snap.Item(id)
 	if !ok {
-		http.NotFound(w, r)
-		return
+		p, isPart := snap.Part(id)
+		if !isPart {
+			http.NotFound(w, r)
+			return
+		}
+		m = p.Movie
 	}
 	out := []BaseItemDto{}
 	if m.Parent != nil {
-		out = append(out, s.itemDto(m.Parent, fieldSet{}, sess))
+		out = append(out, s.itemDto(m.Parent, fieldSet{}, sess, nil))
 	}
 	if l, ok := snap.Library(m.LibraryID); ok {
 		out = append(out, s.viewDto(l))
@@ -331,10 +445,14 @@ func (s *Server) extras(w http.ResponseWriter, r *http.Request, sess *Session, t
 		http.NotFound(w, r)
 		return
 	}
+	user, ok := s.userState(w, r, sess.User)
+	if !ok {
+		return
+	}
 	out := []BaseItemDto{}
 	for _, x := range m.Extras {
 		if (x.ExtraType == "Trailer") == trailers {
-			out = append(out, s.itemDto(x, nil, sess))
+			out = append(out, s.itemDto(x, nil, sess, user))
 		}
 	}
 	writeJSON(w, http.StatusOK, out)

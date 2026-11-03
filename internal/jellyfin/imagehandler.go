@@ -26,10 +26,17 @@ func (s *Server) itemImage(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	m, ok := s.Catalog.Snapshot().Item(normalizeID(r.PathValue("itemId")))
+	snap := s.Catalog.Snapshot()
+	id := normalizeID(r.PathValue("itemId"))
+	m, ok := snap.Item(id)
 	if !ok {
-		http.NotFound(w, r)
-		return
+		// Later parts of a movie show the movie's artwork.
+		p, isPart := snap.Part(id)
+		if !isPart {
+			http.NotFound(w, r)
+			return
+		}
+		m = p.Movie
 	}
 	if kind != images.Primary && m.IsExtra() {
 		http.NotFound(w, r)

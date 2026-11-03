@@ -123,6 +123,53 @@ func TestQueries(t *testing.T) {
 	}
 }
 
+func TestPartsAndPlayState(t *testing.T) {
+	s := testSnapshot()
+	verdammnis, _ := s.Item("m2")
+	if verdammnis.PartCount() != 2 {
+		t.Errorf("PartCount %d, want 2 (the SD version is split)", verdammnis.PartCount())
+	}
+	p, ok := s.Part("f3")
+	if !ok || p.Movie != verdammnis || p.Version.Label != "SD" || p.Index != 1 || !p.IsLast() {
+		t.Errorf("part f3: %+v", p)
+	}
+	if first, _ := s.Part("f2"); first.Index != 0 || first.IsLast() {
+		t.Errorf("part f2: %+v", first)
+	}
+
+	t0 := time.Date(2026, 11, 3, 20, 0, 0, 0, time.UTC)
+	user := map[string]store.UserData{
+		"m1":   {ItemID: "m1", Played: true, PlayCount: 2, LastPlayed: t0},
+		"m3":   {ItemID: "m3", Position: 20 * time.Minute, LastPlayed: t0.Add(time.Hour), IsFavorite: true},
+		"f3":   {ItemID: "f3", Position: 5 * time.Minute, LastPlayed: t0.Add(2 * time.Hour)},
+		"m4":   {ItemID: "m4", Position: time.Minute, Played: true},
+		"gone": {ItemID: "gone", Position: time.Minute},
+	}
+	yes, no := true, false
+	for name, tc := range map[string]struct {
+		q    Query
+		want string
+	}{
+		"played":      {Query{User: user, Played: &yes}, "2 Guns, The Abyss"},
+		"unplayed":    {Query{User: user, Played: &no}, "Ärger, Verdammnis"},
+		"favourites":  {Query{User: user, Favorite: &yes}, "Ärger"},
+		"resumable":   {Query{User: user, Resumable: &yes}, "2 Guns, Ärger"},
+		"date played": {Query{User: user, SortBy: []string{"DatePlayed"}, Descending: []bool{true}}, "Ärger, The Abyss, 2 Guns, Verdammnis"},
+		"play count":  {Query{User: user, SortBy: []string{"PlayCount"}, Descending: []bool{true}}, "The Abyss, 2 Guns, Ärger, Verdammnis"},
+	} {
+		if got, _ := s.Movies(tc.q); titles(got) != tc.want {
+			t.Errorf("%s: %q, want %q", name, titles(got), tc.want)
+		}
+	}
+	resume := s.Resume(user, "", 0)
+	if len(resume) != 2 || resume[0].Data.ItemID != "f3" || resume[0].Index != 1 || resume[1].Movie.ID != "m3" {
+		t.Errorf("resume: %+v", resume)
+	}
+	if r := s.Resume(user, "other", 0); len(r) != 0 {
+		t.Errorf("resume in other library: %+v", r)
+	}
+}
+
 func TestSearchKey(t *testing.T) {
 	for in, want := range map[string]string{
 		"Wall·E":                   "wall e",

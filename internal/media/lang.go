@@ -1,17 +1,25 @@
 package media
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 // Locale selects the language of display titles: "en" (as Jellyfin) or "de".
 type Locale string
 
 type words struct {
-	Default, Forced, External, HearingImpaired, Original, Undefined, Chapter string
+	Default, Forced, External, HearingImpaired, Original, Undefined, Chapter, Part string
 }
 
 var localeWords = map[Locale]words{
-	"en": {"Default", "Forced", "External", "Hearing Impaired", "Original", "Und", "Chapter"},
-	"de": {"Standard", "Erzwungen", "Extern", "Hörgeschädigt", "Original", "Undefiniert", "Kapitel"},
+	"en": {"Default", "Forced", "External", "Hearing Impaired", "Original", "Und", "Chapter", "Part"},
+	"de": {"Standard", "Erzwungen", "Extern", "Hörgeschädigt", "Original", "Undefiniert", "Kapitel", "Teil"},
+}
+
+// PartName names part n (1-based) of a split movie, e.g. "Part 2".
+func (l Locale) PartName(n int) string {
+	return l.words().Part + " " + strconv.Itoa(n)
 }
 
 func (l Locale) words() words {

@@ -7,6 +7,7 @@ import (
 	"homeflix/internal/catalog"
 	"homeflix/internal/images"
 	"homeflix/internal/media"
+	"homeflix/internal/store"
 )
 
 // BaseItemDto describes a library view, movie or extra.
@@ -99,6 +100,7 @@ type MediaSourceInfo struct {
 	SupportsTranscoding        bool              `json:"SupportsTranscoding"`
 	SupportsDirectStream       bool              `json:"SupportsDirectStream"`
 	SupportsDirectPlay         bool              `json:"SupportsDirectPlay"`
+	DirectStreamURL            string            `json:"DirectStreamUrl,omitempty"`
 	IsInfiniteStream           bool              `json:"IsInfiniteStream"`
 	RequiresOpening            bool              `json:"RequiresOpening"`
 	RequiresClosing            bool              `json:"RequiresClosing"`
@@ -223,22 +225,29 @@ func streamDtos(info media.Info) []MediaStreamDto {
 	return out
 }
 
-// sourceDto describes one version. showPath reveals the file system path,
+// sourceDto describes one file of a version as a media source. The first
+// part of a version is the version itself; later parts are sources of
+// their own, under their file ID. showPath reveals the file system path,
 // which only administrators get to see.
-func sourceDto(m *catalog.Movie, v *catalog.Version, showPath bool) MediaSourceInfo {
-	info := v.Info()
+func sourceDto(m *catalog.Movie, v *catalog.Version, index int, showPath bool) MediaSourceInfo {
+	part := v.Parts[index]
+	info := part.Info
+	id := v.ID
+	if index > 0 {
+		id = part.File.ID
+	}
 	name := v.Label
 	if name == "" {
 		name = m.Title
 	}
 	src := MediaSourceInfo{
 		Protocol:               "File",
-		ID:                     v.ID,
+		ID:                     id,
 		Type:                   "Default",
 		Container:              info.Container,
-		Size:                   v.Size,
+		Size:                   part.File.Size,
 		Name:                   name,
-		RunTimeTicks:           ticks(v.Duration),
+		RunTimeTicks:           ticks(info.Duration),
 		SupportsDirectStream:   true,
 		SupportsDirectPlay:     true,
 		SupportsProbing:        true,
@@ -251,7 +260,7 @@ func sourceDto(m *catalog.Movie, v *catalog.Version, showPath bool) MediaSourceI
 		TranscodingSubProtocol: "http",
 	}
 	if showPath {
-		src.Path = v.Parts[0].File.Path
+		src.Path = part.File.Path
 	}
 	if a := info.DefaultAudioIndex(); a >= 0 {
 		src.DefaultAudioStreamIndex = intPtr(a)
@@ -275,17 +284,46 @@ func parseFields(r string) fieldSet {
 
 func (f fieldSet) has(name string) bool { return f == nil || f[strings.ToLower(name)] }
 
-func (s *Server) userData(id string) UserItemDataDto {
-	return UserItemDataDto{Key: id, ItemID: id}
+// userDataDto describes the user's state of an item that runs for runtime.
+func userDataDto(id string, d store.UserData, runtime time.Duration) UserItemDataDto {
+	u := UserItemDataDto{
+		PlaybackPositionTicks: ticks(d.Position),
+		PlayCount:             d.PlayCount,
+		IsFavorite:            d.IsFavorite,
+		Played:                d.Played,
+		LastPlayedDate:        timePtr(d.LastPlayed),
+		Key:                   id,
+		ItemID:                id,
+	}
+	if d.Position > 0 && runtime > 0 {
+		u.PlayedPercentage = 100 * float64(d.Position) / float64(runtime)
+	}
+	return u
 }
 
-// itemDto describes a movie or extra. A nil fieldSet means all fields, as
-// for single-item requests.
-func (s *Server) itemDto(m *catalog.Movie, fields fieldSet, sess *Session) BaseItemDto {
+// runtimeOf is the duration playback positions of a movie refer to: that
+// of the first file of its default version.
+func runtimeOf(m *catalog.Movie) time.Duration {
+	if len(m.Versions) == 0 {
+		return 0
+	}
+	return m.Versions[0].Parts[0].Info.Duration
+}
+
+func chapterDtos(info media.Info) []ChapterInfoDto {
+	out := []ChapterInfoDto{}
+	for _, c := range info.Chapters {
+		out = append(out, ChapterInfoDto{StartPositionTicks: ticks(c.Start), Name: c.Name})
+	}
+	return out
+}
+
+// baseDto holds the fields movies, extras and parts share.
+func (s *Server) baseDto(m *catalog.Movie, id string) BaseItemDto {
 	d := BaseItemDto{
 		Name:              m.Title,
 		ServerID:          s.ServerID,
-		ID:                m.ID,
+		ID:                id,
 		DateCreated:       timePtr(m.DateCreated),
 		CanDownload:       true,
 		SortName:          m.SortTitle,
@@ -299,7 +337,6 @@ func (s *Server) itemDto(m *catalog.Movie, fields fieldSet, sess *Session) BaseI
 		People:            []any{},
 		Studios:           []any{},
 		GenreItems:        []any{},
-		UserData:          s.userData(m.ID),
 		Tags:              []string{},
 		VideoType:         "VideoFile",
 		ImageTags:         map[string]string{},
@@ -321,13 +358,6 @@ func (s *Server) itemDto(m *catalog.Movie, fields fieldSet, sess *Session) BaseI
 	if m.TMDbID != "" {
 		d.ProviderIDs["Tmdb"] = m.TMDbID
 	}
-	for _, x := range m.Extras {
-		if x.ExtraType == "Trailer" {
-			d.LocalTrailerCount++
-		} else {
-			d.SpecialFeatureCount++
-		}
-	}
 	if tag := images.Tag(m, images.Primary); tag != "" {
 		d.ImageTags[string(images.Primary)] = tag
 		d.PrimaryImageAspectRatio = images.AspectRatio(m)
@@ -337,46 +367,86 @@ func (s *Server) itemDto(m *catalog.Movie, fields fieldSet, sess *Session) BaseI
 			d.ImageTags[string(images.Thumb)] = backdrop
 		}
 	}
-	if len(m.Versions) > 0 {
-		def := m.Versions[0]
-		info := def.Info()
-		d.Container = info.Container
-		d.RunTimeTicks = ticks(def.Duration)
-		for _, st := range info.Streams {
-			if st.Type == "Subtitle" {
-				d.HasSubtitles = true
-			}
+	return d
+}
+
+func describeFile(d *BaseItemDto, info media.Info) {
+	d.Container = info.Container
+	d.RunTimeTicks = ticks(info.Duration)
+	for _, st := range info.Streams {
+		if st.Type == "Subtitle" {
+			d.HasSubtitles = true
 		}
-		if v, ok := info.Video(); ok {
-			d.Width, d.Height = v.Width, v.Height
-			hd := v.Height >= 700 || v.Width >= 1260
-			d.IsHD = &hd
+	}
+	if v, ok := info.Video(); ok {
+		d.Width, d.Height = v.Width, v.Height
+		hd := v.Height >= 700 || v.Width >= 1260
+		d.IsHD = &hd
+	}
+}
+
+// itemDto describes a movie or extra. A nil fieldSet means all fields, as
+// for single-item requests. user holds the requesting user's state.
+func (s *Server) itemDto(m *catalog.Movie, fields fieldSet, sess *Session, user map[string]store.UserData) BaseItemDto {
+	d := s.baseDto(m, m.ID)
+	d.UserData = userDataDto(m.ID, user[m.ID], runtimeOf(m))
+	for _, x := range m.Extras {
+		if x.ExtraType == "Trailer" {
+			d.LocalTrailerCount++
+		} else {
+			d.SpecialFeatureCount++
 		}
-		if len(def.Parts) > 1 {
-			d.PartCount = len(def.Parts)
+	}
+	if len(m.Versions) == 0 {
+		return d
+	}
+	info := m.Versions[0].Info()
+	describeFile(&d, info)
+	if n := m.PartCount(); n > 1 {
+		d.PartCount = n
+	}
+	if len(m.Versions) > 1 {
+		d.MediaSourceCount = len(m.Versions)
+	}
+	showPath := sess.User.IsAdmin && fields.has("Path")
+	if showPath {
+		d.Path = m.Path
+	}
+	if fields.has("MediaSources") {
+		for _, v := range m.Versions {
+			d.MediaSources = append(d.MediaSources, sourceDto(m, v, 0, showPath))
 		}
-		if len(m.Versions) > 1 {
-			d.MediaSourceCount = len(m.Versions)
-		}
-		showPath := sess.User.IsAdmin && fields.has("Path")
-		if showPath {
-			d.Path = m.Path
-		}
-		if fields.has("MediaSources") {
-			for _, v := range m.Versions {
-				d.MediaSources = append(d.MediaSources, sourceDto(m, v, showPath))
-			}
-		}
-		if fields.has("MediaStreams") {
-			d.MediaStreams = streamDtos(info)
-		}
-		if fields.has("Chapters") {
-			d.Chapters = []ChapterInfoDto{}
-			for _, c := range info.Chapters {
-				d.Chapters = append(d.Chapters, ChapterInfoDto{StartPositionTicks: ticks(c.Start), Name: c.Name,
-					ImageDateModified: time.Time{}})
-			}
-		}
+	}
+	if fields.has("MediaStreams") {
+		d.MediaStreams = streamDtos(info)
+	}
+	if fields.has("Chapters") {
+		d.Chapters = chapterDtos(info)
+	}
+	return d
+}
+
+// partDto describes a later part of a split movie as an item of its own,
+// as Jellyfin lists additional parts.
+func (s *Server) partDto(r catalog.PartRef, fields fieldSet, sess *Session, user map[string]store.UserData) BaseItemDto {
+	part := r.Part()
+	id := part.File.ID
+	d := s.baseDto(r.Movie, id)
+	d.Name = r.Movie.Title + " – " + s.Catalog.Locale.PartName(r.Index+1)
+	d.UserData = userDataDto(id, user[id], part.Info.Duration)
+	describeFile(&d, part.Info)
+	showPath := sess.User.IsAdmin && fields.has("Path")
+	if showPath {
+		d.Path = part.File.Path
+	}
+	if fields.has("MediaSources") {
+		d.MediaSources = []MediaSourceInfo{sourceDto(r.Movie, r.Version, r.Index, showPath)}
+	}
+	if fields.has("MediaStreams") {
+		d.MediaStreams = streamDtos(part.Info)
+	}
+	if fields.has("Chapters") {
+		d.Chapters = chapterDtos(part.Info)
 	}
 	return d
 }
@@ -398,7 +468,7 @@ func (s *Server) viewDto(l catalog.Library) BaseItemDto {
 		People:               []any{},
 		Studios:              []any{},
 		GenreItems:           []any{},
-		UserData:             s.userData(l.ID),
+		UserData:             UserItemDataDto{Key: l.ID, ItemID: l.ID},
 		ChildCount:           &n,
 		DisplayPreferencesID: l.ID,
 		Tags:                 []string{},

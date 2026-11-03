@@ -61,6 +61,31 @@ type Movie struct {
 // IsExtra reports whether the movie is an extra of another movie.
 func (m *Movie) IsExtra() bool { return m.Parent != nil }
 
+// PartCount is the largest number of parts of any version. Clients ask
+// for additional parts only when the movie reports more than one, also for
+// an alternate version that is split while the default one is not.
+func (m *Movie) PartCount() int {
+	n := 0
+	for _, v := range m.Versions {
+		n = max(n, len(v.Parts))
+	}
+	return n
+}
+
+// PartRef locates one file of a movie. Files after the first of a version
+// are addressed by their file ID, as Jellyfin's additional parts.
+type PartRef struct {
+	Movie   *Movie
+	Version *Version
+	Index   int // 0 for the first part
+}
+
+// Part returns the part.
+func (r PartRef) Part() Part { return r.Version.Parts[r.Index] }
+
+// IsLast reports whether this is the last part of its version.
+func (r PartRef) IsLast() bool { return r.Index == len(r.Version.Parts)-1 }
+
 // Snapshot is an immutable state of the catalog.
 type Snapshot struct {
 	Libraries []Library
@@ -68,6 +93,7 @@ type Snapshot struct {
 	byID      map[string]*Movie
 	sources   map[string]*Version
 	sourceOf  map[*Version]*Movie
+	parts     map[string]PartRef // by file ID
 	BuiltAt   time.Time
 }
 
@@ -89,7 +115,8 @@ func (c *Catalog) Snapshot() *Snapshot {
 	return emptySnapshot
 }
 
-var emptySnapshot = &Snapshot{byID: map[string]*Movie{}, sources: map[string]*Version{}, sourceOf: map[*Version]*Movie{}}
+var emptySnapshot = &Snapshot{byID: map[string]*Movie{}, sources: map[string]*Version{},
+	sourceOf: map[*Version]*Movie{}, parts: map[string]PartRef{}}
 
 // Reload rebuilds the snapshot from the database.
 func (c *Catalog) Reload(ctx context.Context) error {
@@ -123,6 +150,7 @@ func Build(libs []store.Library, items []store.Item, loc media.Locale, log *slog
 		byID:     map[string]*Movie{},
 		sources:  map[string]*Version{},
 		sourceOf: map[*Version]*Movie{},
+		parts:    map[string]PartRef{},
 	}
 	counts := map[string]int{}
 	var extras []*Movie
@@ -155,6 +183,9 @@ func Build(libs []store.Library, items []store.Item, loc media.Locale, log *slog
 		for _, v := range m.Versions {
 			s.sources[v.ID] = v
 			s.sourceOf[v] = m
+			for i, p := range v.Parts {
+				s.parts[p.File.ID] = PartRef{Movie: m, Version: v, Index: i}
+			}
 		}
 	}
 	sort.Slice(s.movies, func(i, j int) bool { return lessByName(s.movies[i], s.movies[j]) })
@@ -284,6 +315,12 @@ func (s *Snapshot) Source(id string) (*Movie, *Version, bool) {
 		return nil, nil, false
 	}
 	return s.sourceOf[v], v, true
+}
+
+// Part returns a file of a movie by file ID.
+func (s *Snapshot) Part(fileID string) (PartRef, bool) {
+	r, ok := s.parts[fileID]
+	return r, ok
 }
 
 // Library returns a library by ID.

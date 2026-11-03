@@ -12,9 +12,15 @@ Principles:
   sources are opt-in.
 - One static binary, one SQLite database. No Docker, PostgreSQL or Redis.
 
-Status: milestone M3 of [the stage 1 plan](docs/plan-stage1.md). Clients can
-sign in, browse, sort and search the movies and see their versions, audio
-and subtitle tracks and chapters. Playback follows in M4.
+Status: milestone M4 of [the stage 1 plan](docs/plan-stage1.md). Clients can
+sign in, browse, search and play the movies directly, including alternate
+versions and movies split into parts; watch state, resume positions and
+favourites are kept per user. Metadata from TMDB (opt-in) follows in M5.
+
+Playback is direct play only: the client receives the original file and
+decodes it. PlaybackInfo evaluates the client's device profile as Jellyfin
+does and reports when a file is outside it, but there is no transcoding
+yet, so such files play only if the client manages them anyway.
 
 ## Build
 
