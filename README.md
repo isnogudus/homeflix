@@ -12,9 +12,9 @@ Principles:
   sources are opt-in.
 - One static binary, one SQLite database. No Docker, PostgreSQL or Redis.
 
-Status: milestone M0 of [the stage 1 plan](docs/plan-stage1.md). The server
-answers the discovery and login-screen endpoints; login and the library
-follow in M1–M4.
+Status: milestone M1 of [the stage 1 plan](docs/plan-stage1.md). Clients can
+find the server and sign in; the home screen is empty until the library
+arrives in M2–M4.
 
 ## Build
 
@@ -45,8 +45,31 @@ service homeflix start
 
 The account needs read access to the media directories.
 
+## Users
+
+Users are managed on the command line; there is no sign-up through the API.
+Passwords are read without echo (or as one line from standard input).
+
+```sh
+homeflix user add anna -admin -config /usr/local/etc/homeflix.toml
+homeflix user passwd anna       # also signs anna out on every device
+homeflix user list              # users with their signed-in devices
+homeflix user delete anna
+```
+
+`/Users/Public` always returns an empty list, so login screens ask for name
+and password instead of showing who has an account.
+
 ## Development host
 
 `scripts/deploy-dev.sh [host]` cross-compiles, copies the binary to
 `~/homeflix` on the host over SSH and restarts it as the login user, without
 root. The default host is `claude` (override with `HOMEFLIX_DEV_HOST`).
+
+`scripts/smoke-test.sh <binary>` starts a throwaway instance on 127.0.0.1
+with a generated test user, runs the client login flow with curl and
+removes everything afterwards:
+
+```sh
+ssh claude 'sh -s -- homeflix/bin/homeflix' < scripts/smoke-test.sh
+```

@@ -27,7 +27,8 @@ var version = "dev"
 const defaultConfigPath = "/usr/local/etc/homeflix.toml"
 
 func main() {
-	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
+	cio := cliIO{stdin: os.Stdin, stdout: os.Stdout, stderr: os.Stderr}
+	if err := run(os.Args[1:], cio); err != nil {
 		fmt.Fprintln(os.Stderr, "homeflix:", err)
 		os.Exit(1)
 	}
@@ -38,28 +39,31 @@ func usage(w io.Writer) {
 
 Commands:
   serve     run the server
+  user      manage users (add, passwd, delete, list)
   version   print the version
 
 Run "homeflix <command> -h" for the flags of a command.
 `)
 }
 
-func run(args []string, stdout, stderr io.Writer) error {
+func run(args []string, cio cliIO) error {
 	if len(args) == 0 {
-		usage(stderr)
+		usage(cio.stderr)
 		return errors.New("missing command")
 	}
 	switch args[0] {
 	case "serve":
-		return serve(args[1:], stderr)
+		return serve(args[1:], cio.stderr)
+	case "user":
+		return userCommand(args[1:], cio)
 	case "version":
-		fmt.Fprintf(stdout, "homeflix %s (%s, %s/%s)\n", version, runtime.Version(), runtime.GOOS, runtime.GOARCH)
+		fmt.Fprintf(cio.stdout, "homeflix %s (%s, %s/%s)\n", version, runtime.Version(), runtime.GOOS, runtime.GOARCH)
 		return nil
 	case "help", "-h", "-help", "--help":
-		usage(stdout)
+		usage(cio.stdout)
 		return nil
 	default:
-		usage(stderr)
+		usage(cio.stderr)
 		return fmt.Errorf("unknown command %q", args[0])
 	}
 }
@@ -91,7 +95,13 @@ func serve(args []string, stderr io.Writer) error {
 		return fmt.Errorf("server ID: %w", err)
 	}
 
-	api := &jellyfin.Server{ServerID: serverID, ServerName: cfg.ServerName, Log: log}
+	api := &jellyfin.Server{
+		ServerID:         serverID,
+		ServerName:       cfg.ServerName,
+		Store:            db,
+		Log:              log,
+		FailedLoginDelay: time.Second,
+	}
 	httpServer := &http.Server{
 		Handler:           api.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,

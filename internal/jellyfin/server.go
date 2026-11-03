@@ -9,6 +9,8 @@ import (
 	"runtime/debug"
 	"sync"
 	"time"
+
+	"homeflix/internal/store"
 )
 
 // CompatVersion is the Jellyfin server version homeflix reports. Clients
@@ -23,7 +25,10 @@ const ProductName = "Jellyfin Server"
 type Server struct {
 	ServerID   string
 	ServerName string
+	Store      *store.Store
 	Log        *slog.Logger
+	// FailedLoginDelay slows down password guessing.
+	FailedLoginDelay time.Duration
 
 	unknownMu   sync.Mutex
 	unknownSeen map[string]struct{}
@@ -37,6 +42,9 @@ func (s *Server) Handler() http.Handler {
 	rt := &Router{NotFound: http.HandlerFunc(s.notFound)}
 	s.registerSystem(rt)
 	s.registerUsers(rt)
+	s.registerDisplayPreferences(rt)
+	s.registerSessions(rt)
+	s.registerLibrary(rt)
 	return s.recoverPanics(s.logRequests(rt))
 }
 

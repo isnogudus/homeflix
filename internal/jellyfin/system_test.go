@@ -2,21 +2,31 @@ package jellyfin
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"homeflix/internal/store"
 )
 
-func newTestServer(logBuf *bytes.Buffer) *Server {
+func newTestServer(t *testing.T, logBuf *bytes.Buffer) *Server {
+	t.Helper()
 	if logBuf == nil {
 		logBuf = &bytes.Buffer{}
 	}
+	db, err := store.Open(context.Background(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
 	return &Server{
 		ServerID:   "0123456789abcdef0123456789abcdef",
 		ServerName: "testhost",
+		Store:      db,
 		Log:        slog.New(slog.NewTextHandler(logBuf, &slog.HandlerOptions{Level: slog.LevelDebug})),
 	}
 }
@@ -34,7 +44,7 @@ func get(t *testing.T, h http.Handler, path string, header http.Header) *httptes
 }
 
 func TestPublicSystemInfo(t *testing.T) {
-	h := newTestServer(nil).Handler()
+	h := newTestServer(t, nil).Handler()
 	for _, path := range []string{"/System/Info/Public", "/emby/System/Info/Public"} {
 		rec := get(t, h, path, nil)
 		if rec.Code != http.StatusOK {
@@ -65,14 +75,14 @@ func TestPublicSystemInfo(t *testing.T) {
 }
 
 func TestPing(t *testing.T) {
-	rec := get(t, newTestServer(nil).Handler(), "/System/Ping", nil)
+	rec := get(t, newTestServer(t, nil).Handler(), "/System/Ping", nil)
 	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != `"Jellyfin Server"` {
 		t.Errorf("ping: %d %q", rec.Code, rec.Body.String())
 	}
 }
 
 func TestPublicUsersIsEmptyList(t *testing.T) {
-	rec := get(t, newTestServer(nil).Handler(), "/Users/Public", nil)
+	rec := get(t, newTestServer(t, nil).Handler(), "/Users/Public", nil)
 	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != "[]" {
 		t.Errorf("users/public: %d %q", rec.Code, rec.Body.String())
 	}
@@ -80,7 +90,7 @@ func TestPublicUsersIsEmptyList(t *testing.T) {
 
 func TestUnknownEndpointLoggedOnceWithoutQuery(t *testing.T) {
 	var logs bytes.Buffer
-	h := newTestServer(&logs).Handler()
+	h := newTestServer(t, &logs).Handler()
 	for range 3 {
 		if rec := get(t, h, "/Plugins?ApiKey=secret", nil); rec.Code != http.StatusNotFound {
 			t.Fatalf("status %d", rec.Code)
@@ -96,7 +106,7 @@ func TestUnknownEndpointLoggedOnceWithoutQuery(t *testing.T) {
 
 func TestRequestLogNamesClient(t *testing.T) {
 	var logs bytes.Buffer
-	h := newTestServer(&logs).Handler()
+	h := newTestServer(t, &logs).Handler()
 	get(t, h, "/System/Info/Public", http.Header{
 		"Authorization": {`MediaBrowser Client="Moonfin", Device="iMac", DeviceId="d1", Version="3.0.0"`},
 	})
@@ -107,7 +117,7 @@ func TestRequestLogNamesClient(t *testing.T) {
 
 func TestPanicBecomes500(t *testing.T) {
 	var logs bytes.Buffer
-	s := newTestServer(&logs)
+	s := newTestServer(t, &logs)
 	h := s.recoverPanics(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic("boom") }))
 	rec := get(t, h, "/x", nil)
 	if rec.Code != http.StatusInternalServerError || !strings.Contains(logs.String(), "boom") {
