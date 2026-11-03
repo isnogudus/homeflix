@@ -69,6 +69,19 @@ type Report struct {
 	Took        time.Duration
 }
 
+// Changed reports whether the scan changed anything in the database.
+func (r Report) Changed() bool {
+	if r.Purged > 0 || r.Probed > 0 || r.ProbeFailed > 0 {
+		return true
+	}
+	for _, l := range r.Libraries {
+		if l.Added+l.Updated+l.Moved+l.Returned+l.Missing+l.FilesAdded+l.FilesChanged+l.FilesRemoved > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Scanner) now() time.Time {
 	if s.Now != nil {
 		return s.Now()

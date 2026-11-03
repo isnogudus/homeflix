@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"homeflix/internal/catalog"
 	"homeflix/internal/store"
 )
 
@@ -27,6 +28,7 @@ func newTestServer(t *testing.T, logBuf *bytes.Buffer) *Server {
 		ServerID:   "0123456789abcdef0123456789abcdef",
 		ServerName: "testhost",
 		Store:      db,
+		Catalog:    &catalog.Catalog{Store: db},
 		Log:        slog.New(slog.NewTextHandler(logBuf, &slog.HandlerOptions{Level: slog.LevelDebug})),
 	}
 }

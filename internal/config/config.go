@@ -36,6 +36,13 @@ type Config struct {
 	ScanInterval Duration `toml:"scan_interval"`
 	// SortArticles are leading words ignored when sorting by name.
 	SortArticles []string `toml:"sort_articles"`
+	// FFmpeg is the ffmpeg binary used for still images, looked up in PATH
+	// unless absolute.
+	FFmpeg string `toml:"ffmpeg"`
+	// ImageWorkers is the number of ffmpeg processes extracting stills.
+	ImageWorkers int `toml:"image_workers"`
+	// DisplayLanguage is the language of stream titles: "en" or "de".
+	DisplayLanguage string `toml:"display_language"`
 
 	Libraries []Library `toml:"library"`
 }
@@ -66,14 +73,17 @@ func Default() Config {
 		name = "homeflix"
 	}
 	return Config{
-		ServerName:   name,
-		Listen:       ":8096",
-		DataDir:      "/var/db/homeflix",
-		LogLevel:     "info",
-		FFprobe:      "ffprobe",
-		ProbeWorkers: 4,
-		ScanInterval: Duration{6 * time.Hour},
-		SortArticles: []string{"the", "a", "an"},
+		ServerName:      name,
+		Listen:          ":8096",
+		DataDir:         "/var/db/homeflix",
+		LogLevel:        "info",
+		FFprobe:         "ffprobe",
+		ProbeWorkers:    4,
+		ScanInterval:    Duration{6 * time.Hour},
+		SortArticles:    []string{"the", "a", "an"},
+		FFmpeg:          "ffmpeg",
+		ImageWorkers:    2,
+		DisplayLanguage: "en",
 	}
 }
 
@@ -132,6 +142,15 @@ func (c Config) Validate() error {
 	}
 	if c.ScanInterval.Duration < 0 {
 		return errors.New("scan_interval must not be negative")
+	}
+	if c.FFmpeg == "" {
+		return errors.New("ffmpeg must not be empty")
+	}
+	if c.ImageWorkers < 1 || c.ImageWorkers > 16 {
+		return fmt.Errorf("image_workers %d: want 1 to 16", c.ImageWorkers)
+	}
+	if c.DisplayLanguage != "en" && c.DisplayLanguage != "de" {
+		return fmt.Errorf("display_language %q: want en or de", c.DisplayLanguage)
 	}
 	names := map[string]bool{}
 	paths := map[string]string{}

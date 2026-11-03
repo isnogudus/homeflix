@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"homeflix/internal/catalog"
+	"homeflix/internal/images"
 	"homeflix/internal/store"
 )
 
@@ -31,6 +33,8 @@ type Server struct {
 	FailedLoginDelay time.Duration
 	// RequestScan asks for a library scan without waiting for it.
 	RequestScan func()
+	Catalog     *catalog.Catalog
+	Images      *images.Service
 
 	unknownMu   sync.Mutex
 	unknownSeen map[string]struct{}
@@ -47,6 +51,8 @@ func (s *Server) Handler() http.Handler {
 	s.registerDisplayPreferences(rt)
 	s.registerSessions(rt)
 	s.registerLibrary(rt)
+	s.registerItems(rt)
+	s.registerImages(rt)
 	return s.recoverPanics(s.logRequests(rt))
 }
 

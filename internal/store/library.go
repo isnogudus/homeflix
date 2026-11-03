@@ -167,6 +167,48 @@ func (s *Store) LibraryItems(ctx context.Context, libraryID string) ([]Item, err
 	return items, frows.Err()
 }
 
+// PresentItems returns all items that are not missing, of every library,
+// with their files including probe data.
+func (s *Store) PresentItems(ctx context.Context) ([]Item, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT "+itemColumns+" FROM items WHERE missing_since IS NULL")
+	if err != nil {
+		return nil, err
+	}
+	var items []Item
+	index := map[string]int{}
+	for rows.Next() {
+		it, err := scanItem(rows)
+		if err != nil {
+			rows.Close()
+			return nil, err
+		}
+		index[it.ID] = len(items)
+		items = append(items, it)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	frows, err := s.db.QueryContext(ctx, `SELECT f.id, f.item_id, f.version, f.part, f.path, f.size, f.mtime,
+		f.probe, f.probe_error, f.probed_at, f.duration_ms, f.container, f.bit_rate
+		FROM media_files f JOIN items i ON i.id = f.item_id WHERE i.missing_since IS NULL
+		ORDER BY f.version, f.part`)
+	if err != nil {
+		return nil, err
+	}
+	defer frows.Close()
+	for frows.Next() {
+		f, err := scanFile(frows)
+		if err != nil {
+			return nil, err
+		}
+		if i, ok := index[f.ItemID]; ok {
+			items[i].Files = append(items[i].Files, f)
+		}
+	}
+	return items, frows.Err()
+}
+
 // FileUpdate changes the location or content of a known file.
 type FileUpdate struct {
 	File       MediaFile

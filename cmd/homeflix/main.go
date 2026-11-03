@@ -13,14 +13,19 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
+	"homeflix/internal/catalog"
 	"homeflix/internal/config"
+	"homeflix/internal/images"
 	"homeflix/internal/jellyfin"
 	"homeflix/internal/library"
+	"homeflix/internal/media"
 	"homeflix/internal/store"
 )
 
@@ -107,25 +112,56 @@ func serve(args []string, stderr io.Writer) error {
 	if _, err := exec.LookPath(cfg.FFprobe); err != nil {
 		log.Warn("ffprobe not found; new files cannot be probed", "ffprobe", cfg.FFprobe, "err", err)
 	}
+	if _, err := exec.LookPath(cfg.FFmpeg); err != nil {
+		log.Warn("ffmpeg not found; no images can be made", "ffmpeg", cfg.FFmpeg, "err", err)
+	}
 	if len(cfg.Libraries) == 0 {
 		log.Warn("no libraries configured")
 	}
+	cat := &catalog.Catalog{Store: db, Locale: media.Locale(cfg.DisplayLanguage), Log: log}
+	if err := cat.Reload(ctx); err != nil {
+		return fmt.Errorf("load catalog: %w", err)
+	}
+	imgs := &images.Service{FFmpeg: cfg.FFmpeg, Dir: filepath.Join(cfg.DataDir, "images"), Workers: cfg.ImageWorkers, Log: log}
+
+	var background sync.WaitGroup
+	defer background.Wait()
+	// Runs before the Wait above, so a failing listener also ends the
+	// background work.
+	defer stop()
+	var warming atomic.Bool
+	warm := func() {
+		if !warming.CompareAndSwap(false, true) {
+			return
+		}
+		background.Add(1)
+		go func() {
+			defer background.Done()
+			defer warming.Store(false)
+			imgs.Warm(ctx, cat.Snapshot().AllMovies())
+		}()
+	}
 	scanner := newScanner(cfg, db, log)
 	scanTrigger := make(chan struct{}, 1)
-	var scans sync.WaitGroup
-	scans.Add(1)
+	background.Add(1)
 	go func() {
-		defer scans.Done()
-		runScans(ctx, scanner, cfg.ScanInterval.Duration, scanTrigger, log)
+		defer background.Done()
+		runScans(ctx, scanner, cfg.ScanInterval.Duration, scanTrigger, log, func(rep library.Report) {
+			if rep.Changed() {
+				if err := cat.Reload(ctx); err != nil && ctx.Err() == nil {
+					log.Error("reload catalog", "err", err)
+				}
+			}
+			warm()
+		})
 	}()
-	defer scans.Wait()
-	// Runs before the Wait above, so a failing listener also ends the scan.
-	defer stop()
 
 	api := &jellyfin.Server{
 		ServerID:         serverID,
 		ServerName:       cfg.ServerName,
 		Store:            db,
+		Catalog:          cat,
+		Images:           imgs,
 		Log:              log,
 		FailedLoginDelay: time.Second,
 		RequestScan: func() {
@@ -172,8 +208,10 @@ func serve(args []string, stderr io.Writer) error {
 }
 
 // runScans scans at startup, then every interval (if positive) and
-// whenever trigger fires, until ctx is done.
-func runScans(ctx context.Context, sc *library.Scanner, interval time.Duration, trigger <-chan struct{}, log *slog.Logger) {
+// whenever trigger fires, until ctx is done. done is called after every
+// completed scan.
+func runScans(ctx context.Context, sc *library.Scanner, interval time.Duration, trigger <-chan struct{},
+	log *slog.Logger, done func(library.Report)) {
 	scan := func(reason string) {
 		log.Info("library scan started", "reason", reason)
 		rep, err := sc.Scan(ctx)
@@ -195,6 +233,7 @@ func runScans(ctx context.Context, sc *library.Scanner, interval time.Duration, 
 		}
 		log.Info("library scan finished", "purged", rep.Purged, "probed", rep.Probed,
 			"probe_failures", rep.ProbeFailed, "took", rep.Took.Round(time.Millisecond))
+		done(rep)
 	}
 	scan("startup")
 	var tick <-chan time.Time

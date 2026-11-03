@@ -4,6 +4,8 @@ listen = ":8096"
 data_dir = "data"
 log_level = "debug"
 ffprobe = "/usr/local/bin/ffprobe"
+ffmpeg = "/usr/local/bin/ffmpeg"
+display_language = "de"
 
 [[library]]
 name = "Filme"

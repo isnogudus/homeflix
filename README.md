@@ -12,9 +12,9 @@ Principles:
   sources are opt-in.
 - One static binary, one SQLite database. No Docker, PostgreSQL or Redis.
 
-Status: milestone M2 of [the stage 1 plan](docs/plan-stage1.md). Clients can
-find the server and sign in; the libraries are scanned and probed, but the
-API shows them only from M3 on.
+Status: milestone M3 of [the stage 1 plan](docs/plan-stage1.md). Clients can
+sign in, browse, sort and search the movies and see their versions, audio
+and subtitle tracks and chapters. Playback follows in M4.
 
 ## Build
 
@@ -62,6 +62,12 @@ only new or changed files are probed with ffprobe. Renamed and moved files
 keep their item (matched by size and modification time, or by IMDb ID); a
 movie that disappears is kept for 30 days, and a library directory that
 cannot be read leaves its movies untouched.
+
+Artwork comes from the videos themselves, so nothing is fetched from the
+internet: ffmpeg takes three frames of each movie, black bars are cut off,
+HDR10 frames are tone-mapped to SDR, and the frame with the most contrast
+becomes the still that posters (cut to 2:3) and backdrops are made from.
+Stills are made in the background after each scan and on first request.
 
 ```sh
 homeflix scan -config /usr/local/etc/homeflix.toml            # scan once

@@ -27,6 +27,17 @@
 # Leading words ignored when sorting by name.
 #sort_articles = ["the", "a", "an"]
 
+# ffmpeg binary for artwork, looked up in PATH unless absolute. Posters and
+# backdrops are cut from a still of each movie: the best of three frames,
+# black bars removed, HDR10 converted to SDR.
+#ffmpeg = "ffmpeg"
+
+# Number of ffmpeg processes making stills in parallel.
+#image_workers = 2
+
+# Language of audio and subtitle track titles: "en" (as Jellyfin) or "de".
+#display_language = "en"
+
 # One block per library. A movie is a single file, a set of "part1",
 # "part2" files, or a folder named "Title (Year)" holding versions, parts
 # and extras folders such as "behind the scenes" or "trailers". Movies that
