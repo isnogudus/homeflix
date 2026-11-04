@@ -290,7 +290,7 @@ func TestHomeScreenIsEmpty(t *testing.T) {
 	c := &apiClient{t: t, h: s.Handler()}
 	login(t, c, "anna", "pw")
 
-	for _, p := range []string{"/UserViews", "/UserItems/Resume?userId=" + anna.ID, "/Users/" + anna.ID + "/Items", "/Shows/NextUp"} {
+	for _, p := range []string{"/UserViews", "/UserItems/Resume?userId=" + anna.ID, "/Users/" + anna.ID + "/Items", "/Shows/NextUp", "/LiveTv/Channels"} {
 		rec := c.do("GET", p, "", nil)
 		if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"Items":[]`) || !strings.Contains(rec.Body.String(), `"TotalRecordCount":0`) {
 			t.Errorf("%s: %d %s", p, rec.Code, rec.Body.String())

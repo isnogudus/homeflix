@@ -342,20 +342,27 @@ func TestRemoveUnusedArtwork(t *testing.T) {
 	f.update()
 	md, _ := f.meta("arrival")
 	dir := f.svc.Dir
-	for _, name := range []string{"11-poster-old.jpg", ".download-fresh"} {
-		os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o644)
-	}
-	stale := filepath.Join(dir, ".download-stale")
-	os.WriteFile(stale, []byte("x"), 0o644)
+	// Unused files are removed once they are older than an hour; younger
+	// ones may belong to an update in another process.
 	old := time.Now().Add(-2 * time.Hour)
-	os.Chtimes(stale, old, old)
+	for name, age := range map[string]bool{"11-poster-old.jpg": true, "12-profile-new.jpg": false,
+		".download-fresh": false, ".download-stale": true} {
+		p := filepath.Join(dir, name)
+		os.WriteFile(p, []byte("x"), 0o644)
+		if age {
+			os.Chtimes(p, old, old)
+		}
+	}
+	for _, name := range []string{md.Poster, md.Backdrop} {
+		os.Chtimes(filepath.Join(dir, name), old, old)
+	}
 
 	n, err := RemoveUnusedArtwork(context.Background(), f.store, dir, nil)
 	if err != nil || n != 2 {
 		t.Fatalf("removed %d, %v; want 2", n, err)
 	}
 	for name, want := range map[string]bool{
-		md.Poster: true, md.Backdrop: true, "11-poster-old.jpg": false,
+		md.Poster: true, md.Backdrop: true, "11-poster-old.jpg": false, "12-profile-new.jpg": true,
 		".download-fresh": true, ".download-stale": false,
 	} {
 		_, err := os.Stat(filepath.Join(dir, name))
@@ -422,6 +429,8 @@ func TestPeople(t *testing.T) {
 	if people, _ := f.store.AllPeople(ctx); len(people) != 0 {
 		t.Errorf("people of a deleted movie kept: %+v", people)
 	}
+	old := time.Now().Add(-2 * time.Hour)
+	os.Chtimes(filepath.Join(f.svc.Dir, amy.Photo), old, old)
 	RemoveUnusedArtwork(ctx, f.store, f.svc.Dir, nil)
 	if _, err := os.Stat(filepath.Join(f.svc.Dir, amy.Photo)); !os.IsNotExist(err) {
 		t.Errorf("photo of a forgotten person kept: %v", err)

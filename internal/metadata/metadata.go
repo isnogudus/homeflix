@@ -605,14 +605,16 @@ func (s *Service) Match(ctx context.Context, it store.Item, tmdbID int) (store.M
 	return md, s.Store.SaveMetadata(ctx, md)
 }
 
-// staleDownload is how old an unfinished download must be before it is
-// removed; younger ones may belong to a running update.
-const staleDownload = time.Hour
+// minAge is how old a file must be before it is removed as unused: an
+// update running elsewhere, such as "homeflix match update" next to the
+// server, stores the file before the database row that refers to it.
+const minAge = time.Hour
 
 // RemoveUnusedArtwork deletes files in dir that no metadata refers to:
-// artwork of movies deleted for good, artwork replaced by a newer one at
-// TMDB, and downloads left over from interrupted updates. It does not
-// need TMDB access, so it also runs while TMDB is switched off.
+// artwork of movies deleted for good, portraits of people no movie lists
+// any more, artwork replaced by a newer one at TMDB, and downloads left
+// over from interrupted updates. Files younger than minAge are kept. It
+// does not need TMDB access, so it also runs while TMDB is switched off.
 func RemoveUnusedArtwork(ctx context.Context, st *store.Store, dir string, log *slog.Logger) (int, error) {
 	des, err := os.ReadDir(dir)
 	if errors.Is(err, os.ErrNotExist) {
@@ -642,10 +644,8 @@ func RemoveUnusedArtwork(ctx context.Context, st *store.Store, dir string, log *
 		if de.IsDir() || used[name] {
 			continue
 		}
-		if strings.HasPrefix(name, ".download-") {
-			if fi, err := de.Info(); err != nil || time.Since(fi.ModTime()) < staleDownload {
-				continue
-			}
+		if fi, err := de.Info(); err != nil || time.Since(fi.ModTime()) < minAge {
+			continue
 		}
 		if err := os.Remove(filepath.Join(dir, name)); err != nil {
 			return removed, err

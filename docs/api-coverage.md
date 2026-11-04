@@ -64,6 +64,7 @@ Users are created, changed and deleted with `homeflix user` only.
 | `GET /Items/{itemId}/ThemeMedia` | yes | empty |
 | `GET /MediaSegments/{itemId}` | yes | empty |
 | `GET /Shows/NextUp` | yes | empty: homeflix has no series |
+| `GET /LiveTv/Channels` | yes | empty: homeflix has no live TV |
 | `GET /Genres`, `GET /Persons`, `GET /Studios` | yes | from TMDB metadata; people with portrait tag, and their biography with `Fields=Overview` |
 | `GET /Items/{personId}` | yes | a person: biography (`Overview`), birth (`PremiereDate`, `ProductionYear`), death (`EndDate`), place of birth (`ProductionLocations`), TMDB and IMDb IDs |
 

@@ -84,6 +84,7 @@ var pluginProbes = []string{
 	"/Moonfin/Pin",
 	"/Moonfin/Games/Libraries",
 	"/Moonfin/AnimeMarkers/Items",
+	"/Moonfin/Seerr/Status",
 	"/Plugins/AchievementBadges/public-config",
 }
 

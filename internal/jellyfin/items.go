@@ -41,7 +41,8 @@ func (s *Server) registerItems(rt *Router) {
 	for _, p := range []string{"/Items/{itemId}/Intros", "/Users/{userId}/Items/{itemId}/Intros"} {
 		rt.HandleFunc(http.MethodGet, p, s.authed(s.emptyItems))
 	}
-	for _, p := range []string{"/MediaSegments/{itemId}", "/Shows/NextUp"} {
+	// homeflix has no series and no live TV.
+	for _, p := range []string{"/MediaSegments/{itemId}", "/Shows/NextUp", "/LiveTv/Channels"} {
 		rt.HandleFunc(http.MethodGet, p, s.authed(s.emptyItems))
 	}
 	rt.HandleFunc(http.MethodGet, "/Genres", s.authed(s.facets("genre", "Genre")))

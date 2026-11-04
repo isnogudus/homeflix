@@ -176,8 +176,8 @@ homeflix backup /backup/homeflix.db -config /usr/local/etc/homeflix.conf
 ```
 
 which writes a consistent copy (SQLite `VACUUM INTO`) readable by its owner
-only, since it holds password hashes. Artwork and subtitles no movie uses
-any more are removed after each scan.
+only, since it holds password hashes. Artwork, portraits and subtitles no
+movie uses any more are removed after each scan, once they are an hour old.
 
 ## Development host
 
