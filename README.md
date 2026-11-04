@@ -154,6 +154,22 @@ homeflix match clear "Heat (1995)" -config /usr/local/etc/homeflix.conf   # look
 
 This product uses the TMDB API but is not endorsed or certified by TMDB.
 
+## Web pages and remote access
+
+homeflix has web pages of its own: the web client under `/web/` (the
+server address alone leads there) and the admin UI under `/admin/`. They
+are being built in [stage 2](docs/plan-stage2.md); for now they offer
+sign-in and show where a request comes from.
+
+For access from outside, put homeflix behind a reverse proxy that does
+TLS, such as Caddy or `tailscale serve`, and name the proxy in
+`trusted proxy`, so that homeflix sees the client's own address. The admin
+UI and administrative API requests answer only from the networks in
+`admin from` (by default the home network and the tailnet), also when a
+proxy forwards everything. After 10 failed logins from one address, or 20
+for one user, further logins are refused for 15 minutes, in the web pages
+and the Jellyfin API alike.
+
 ## Users
 
 Users are managed on the command line; there is no sign-up through the API.

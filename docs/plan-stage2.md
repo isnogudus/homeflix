@@ -43,9 +43,11 @@ offline downloads, editing collections, an adaptive bitrate ladder (see
   homeflix keeps speaking plain HTTP behind both.
 - Behind either proxy every request comes from the proxy's address; the
   client address, scheme and host are in `X-Forwarded-For`,
-  `X-Forwarded-Proto` and `X-Forwarded-Host` (Caddy sets all three; which
-  ones `tailscale serve` sets is checked in N0; the scheme is HTTPS through
-  either proxy anyway). homeflix must
+  `X-Forwarded-Proto` and `X-Forwarded-Host`. Caddy sets all three and
+  appends to `X-Forwarded-For`; `tailscale serve` sets all three too and
+  replaces `X-Forwarded-For` with the tailnet address it accepted the
+  connection from (`ipn/ipnlocal/serve.go`). Requests that come in through
+  Tailscale Funnel take the same path but carry a public address. homeflix must
   believe these headers only from the two proxies, or anyone could forge
   their address. With the forwarded address, a tailnet client is told apart
   from one coming in through Caddy.
@@ -126,10 +128,13 @@ Text subtitles are extracted as WebVTT already (stage 1, M6).
 - Security headers on every page: a strict Content-Security-Policy (no
   inline script, no third-party sources), `X-Content-Type-Options`,
   `Referrer-Policy`, `frame-ancestors 'none'`.
-- Login lockout for passwords and passkeys alike: after 10 failures within
-  15 minutes for one user or one client address, further attempts wait
-  15 minutes. It replaces the fixed delay of stage 1 for the Jellyfin login
-  too.
+- Login lockout for passwords and passkeys alike, in the web pages and
+  the Jellyfin API: after 10 failures within 15 minutes from one client
+  address, or 20 for one user, further attempts wait 15 minutes. The higher
+  limit per user makes it harder to lock someone out from outside; a
+  successful login clears the user's count, not the address's, so a working
+  account cannot be used to keep guessing others. The short delay after a
+  failure from stage 1 stays.
 
 ### 3.3 Pages and scripts
 

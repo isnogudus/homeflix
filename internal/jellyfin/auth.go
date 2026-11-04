@@ -3,12 +3,13 @@ package jellyfin
 import (
 	"encoding/json"
 	"errors"
-	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"homeflix/internal/auth"
+	"homeflix/internal/clientaddr"
 	"homeflix/internal/store"
 )
 
@@ -59,13 +60,8 @@ func queryValue(r *http.Request, name string) string {
 	return ""
 }
 
-func remoteHost(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
-}
+// remoteHost is the client address, behind trusted proxies.
+func remoteHost(r *http.Request) string { return clientaddr.From(r).String() }
 
 // authed wraps h so it only runs for requests with a valid access token.
 func (s *Server) authed(h authedHandler) http.HandlerFunc {
@@ -140,6 +136,15 @@ func (s *Server) authenticateByName(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Username is required", http.StatusBadRequest)
 		return
 	}
+	if s.Logins != nil {
+		if wait, ok := s.Logins.Check(req.Username, remoteHost(r)); !ok {
+			s.Log.Warn("login refused after too many failures", "user", req.Username, "client", hdr.Client,
+				"remote", remoteHost(r), "retry_after", wait.Round(time.Second))
+			w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
+			http.Error(w, "Too many failed logins. Try again later.", http.StatusTooManyRequests)
+			return
+		}
+	}
 
 	user, err := s.Store.UserByName(r.Context(), req.Username)
 	switch {
@@ -159,6 +164,9 @@ func (s *Server) authenticateByName(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		s.loginFailed(w, r, req.Username, hdr)
 		return
+	}
+	if s.Logins != nil {
+		s.Logins.Succeeded(req.Username)
 	}
 
 	token, err := auth.NewToken()
@@ -205,6 +213,9 @@ func (s *Server) authenticateByName(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) loginFailed(w http.ResponseWriter, r *http.Request, name string, hdr AuthHeader) {
 	s.Log.Warn("login failed", "user", name, "client", hdr.Client, "device", hdr.Device, "remote", remoteHost(r))
+	if s.Logins != nil {
+		s.Logins.Failed(name, remoteHost(r))
+	}
 	if s.FailedLoginDelay > 0 {
 		select {
 		case <-time.After(s.FailedLoginDelay):

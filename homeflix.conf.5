@@ -114,6 +114,35 @@ for all addresses.
 The default is
 .Ic listen on * port 8096 ,
 the port Jellyfin clients try first.
+.It Ic trusted proxy Ar address | network | list
+The reverse proxies in front of homeflix, such as Caddy or
+.Ql tailscale serve ,
+as addresses or networks in CIDR notation.
+Only requests from them may name the client's address, scheme and host in
+.Em X-Forwarded-For ,
+.Em X-Forwarded-Proto
+and
+.Em X-Forwarded-Host ;
+from anyone else these headers are ignored.
+The client address found this way is logged, counted by the login
+lockout and checked against
+.Ic admin from .
+For
+.Ql tailscale serve
+on the same host, list 127.0.0.1.
+.It Ic no trusted proxy
+Believe no forwarded headers; this is the default.
+.It Ic admin from Ar address | network | list
+The networks the admin UI under
+.Pa /admin/
+and administrative API requests, such as a library refresh, are answered
+from.
+A request through a proxy counts as coming from the client behind it, so
+the admin UI is not reachable from the internet through Caddy even if
+Caddy forwards everything.
+The default is loopback, the private networks and the tailnet range:
+.Li { 127.0.0.0/8, ::1, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16,
+.Li fc00::/7, 100.64.0.0/10 } .
 .It Ic discovery
 Answer the broadcasts on UDP port 7359 with which Jellyfin clients look
 for servers in the local network, so they list homeflix without its

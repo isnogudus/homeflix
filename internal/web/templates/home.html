@@ -1,0 +1,8 @@
+{{define "title"}}{{t "home"}}{{end}}
+{{define "content"}}
+<section class="card">
+	<h1>{{printf (t "welcome") .Session.User.Name}}</h1>
+	<p>{{t "comingSoon"}}</p>
+	{{if .Data.AdminLink}}<p><a href="/admin/">{{t "admin"}}</a></p>{{end}}
+</section>
+{{end}}

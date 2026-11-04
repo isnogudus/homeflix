@@ -1,0 +1,13 @@
+{{define "title"}}{{t "admin"}}{{end}}
+{{define "content"}}
+<section class="card">
+	<h1>{{t "admin"}}</h1>
+	<p>{{t "adminSoon"}}</p>
+	<h2>{{t "yourRequest"}}</h2>
+	<dl>
+		<dt>{{t "address"}}</dt><dd>{{.Data.Client.String}}</dd>
+		<dt>{{t "origin"}}</dt><dd>{{.Data.Client.Origin}}</dd>
+		<dt>{{t "via"}}</dt><dd>{{if .Data.Client.Proxy}}{{t "yes"}}{{else}}{{t "no"}}{{end}}</dd>
+	</dl>
+</section>
+{{end}}

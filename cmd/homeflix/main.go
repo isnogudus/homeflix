@@ -22,15 +22,18 @@ import (
 	"time"
 
 	"homeflix/internal/catalog"
+	"homeflix/internal/clientaddr"
 	"homeflix/internal/config"
 	"homeflix/internal/discovery"
 	"homeflix/internal/images"
 	"homeflix/internal/jellyfin"
 	"homeflix/internal/library"
+	"homeflix/internal/lockout"
 	"homeflix/internal/media"
 	"homeflix/internal/metadata"
 	"homeflix/internal/store"
 	"homeflix/internal/subtitles"
+	"homeflix/internal/web"
 )
 
 // version is set at build time with -ldflags "-X main.version=…".
@@ -220,6 +223,9 @@ func serve(args []string, stdout, stderr io.Writer) error {
 		watchCatalogVersion(ctx, db, reload, log)
 	}()
 
+	// One lockout for the web pages and the Jellyfin API, so that switching
+	// between them gives no extra guesses.
+	logins := lockout.NewGuard()
 	api := &jellyfin.Server{
 		ServerID:         serverID,
 		ServerName:       cfg.ServerName,
@@ -229,7 +235,19 @@ func serve(args []string, stdout, stderr io.Writer) error {
 		Subtitles:        subs,
 		Log:              log,
 		FailedLoginDelay: time.Second,
+		Logins:           logins,
+		Clients:          clientaddr.Resolver{Trusted: cfg.TrustedProxies},
+		AdminFrom:        cfg.AdminFrom,
 		Shutdown:         ctx,
+		Web: (&web.Server{
+			ServerName:       cfg.ServerName,
+			Store:            db,
+			Log:              log,
+			Logins:           logins,
+			AdminFrom:        cfg.AdminFrom,
+			Language:         cfg.DisplayLanguage,
+			FailedLoginDelay: time.Second,
+		}).Handler(),
 		RequestScan: func() {
 			select {
 			case scanTrigger <- struct{}{}:

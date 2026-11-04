@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="{{.Lang}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{template "title" .}} · {{.Server}}</title>
+<link rel="stylesheet" href="/web/static/style.css">
+</head>
+<body>
+<header class="bar">
+	<a class="brand" href="/web/">homeflix</a>
+	{{with .Session}}
+	<nav>
+		<span class="who">{{t "signedInAs"}} {{.User.Name}}</span>
+		<form method="post" action="/web/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button>{{t "signOut"}}</button></form>
+	</nav>
+	{{end}}
+</header>
+<main>
+{{template "content" .}}
+</main>
+</body>
+</html>

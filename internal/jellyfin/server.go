@@ -11,12 +11,16 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"time"
 
 	"homeflix/internal/catalog"
+	"homeflix/internal/clientaddr"
 	"homeflix/internal/images"
+	"homeflix/internal/lockout"
 	"homeflix/internal/store"
 	"homeflix/internal/subtitles"
 )
@@ -37,6 +41,16 @@ type Server struct {
 	Log        *slog.Logger
 	// FailedLoginDelay slows down password guessing.
 	FailedLoginDelay time.Duration
+	// Logins refuses logins after too many failures; nil allows all.
+	Logins *lockout.Guard
+	// Clients resolves client addresses behind trusted proxies.
+	Clients clientaddr.Resolver
+	// AdminFrom are the networks administrative requests are allowed
+	// from; nil allows them from anywhere.
+	AdminFrom []netip.Prefix
+	// Web, if set, serves the web client and the admin UI under /web/ and
+	// /admin/.
+	Web http.Handler
 	// RequestScan asks for a library scan without waiting for it.
 	RequestScan func()
 	Catalog     *catalog.Catalog
@@ -67,7 +81,33 @@ func (s *Server) Handler() http.Handler {
 	s.registerUserData(rt)
 	s.registerSocket(rt)
 	s.registerSubtitles(rt)
-	return s.recoverPanics(s.logRequests(rt))
+	var h http.Handler = rt
+	if s.Web != nil {
+		h = s.withWeb(rt)
+	}
+	return s.Clients.Middleware(s.recoverPanics(s.logRequests(h)))
+}
+
+// withWeb sends the web client's and the admin UI's paths to s.Web, and
+// the bare server address to the web client, as Jellyfin does.
+func (s *Server) withWeb(api http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := strings.ToLower(r.URL.Path)
+		switch {
+		case p == "/" && r.Method == http.MethodGet:
+			http.Redirect(w, r, "/web/", http.StatusFound)
+		case p == "/web" || strings.HasPrefix(p, "/web/") || p == "/admin" || strings.HasPrefix(p, "/admin/"):
+			s.Web.ServeHTTP(w, r)
+		default:
+			api.ServeHTTP(w, r)
+		}
+	})
+}
+
+// adminAllowed reports whether administrative requests are allowed from
+// the client of r.
+func (s *Server) adminAllowed(r *http.Request) bool {
+	return s.AdminFrom == nil || clientaddr.Contains(s.AdminFrom, clientaddr.From(r).Addr)
 }
 
 func (s *Server) notFound(w http.ResponseWriter, r *http.Request) {
@@ -164,7 +204,7 @@ func (s *Server) logRequests(next http.Handler) http.Handler {
 			"status", status,
 			"bytes", rec.bytes,
 			"duration", time.Since(start).Round(time.Microsecond),
-			"remote", r.RemoteAddr,
+			"remote", clientaddr.From(r).String(),
 			"client", clientName(r))
 	})
 }

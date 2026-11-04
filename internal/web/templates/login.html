@@ -1,0 +1,15 @@
+{{define "title"}}{{t "signIn"}}{{end}}
+{{define "content"}}
+<form class="card login" method="post" action="/web/login">
+	<h1>{{.Server}}</h1>
+	{{with .Data.Error}}<p class="error" role="alert">{{t .}}</p>{{end}}
+	<label>{{t "username"}}
+		<input name="username" value="{{.Data.Username}}" autocomplete="username" autocapitalize="none" required autofocus>
+	</label>
+	<label>{{t "password"}}
+		<input name="password" type="password" autocomplete="current-password">
+	</label>
+	<input type="hidden" name="next" value="{{.Data.Next}}">
+	<button class="primary">{{t "signIn"}}</button>
+</form>
+{{end}}

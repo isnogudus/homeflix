@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"log/slog"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -30,6 +31,9 @@ func TestDefaults(t *testing.T) {
 	if cfg.Listen != ":8096" || cfg.ScanInterval != 6*time.Hour || cfg.DisplayLanguage != "en" {
 		t.Errorf("defaults: %+v", cfg)
 	}
+	if len(cfg.TrustedProxies) != 0 || !reflect.DeepEqual(cfg.AdminFrom, DefaultAdminFrom()) {
+		t.Errorf("default proxies %v, admin networks %v", cfg.TrustedProxies, cfg.AdminFrom)
+	}
 }
 
 func TestFullConfiguration(t *testing.T) {
@@ -50,6 +54,8 @@ probe workers 8
 image workers 3
 scan interval 1h30m
 sort articles { The, der die das }
+trusted proxy { 192.168.1.2, 127.0.0.1 }
+admin from { 192.168.1.0/24, 100.64.0.0/10, fd7a:115c:a1e0::/48 }
 
 library "Filme" {
 	path $recent
@@ -73,6 +79,9 @@ library Doku { path ${movies}_doku }
 		SortArticles:    []string{"the", "der", "die", "das"},
 		DisplayLanguage: "de",
 		Discovery:       true,
+		TrustedProxies:  []netip.Prefix{netip.MustParsePrefix("192.168.1.2/32"), netip.MustParsePrefix("127.0.0.1/32")},
+		AdminFrom: []netip.Prefix{netip.MustParsePrefix("192.168.1.0/24"), netip.MustParsePrefix("100.64.0.0/10"),
+			netip.MustParsePrefix("fd7a:115c:a1e0::/48")},
 		Libraries: []Library{
 			{Name: "Filme", Paths: []string{"/media/movies/recent", "/media/movies/archive", "/srv/neue filme"}},
 			{Name: "Doku", Paths: []string{"/media/movies_doku"}},
@@ -189,5 +198,19 @@ func TestSlogLevel(t *testing.T) {
 	cfg.LogLevel = "debug"
 	if cfg.SlogLevel() != slog.LevelDebug {
 		t.Errorf("SlogLevel() = %v", cfg.SlogLevel())
+	}
+}
+
+func TestNetworkErrors(t *testing.T) {
+	for src, want := range map[string]string{
+		"trusted proxy 10.0.0.1/8":                 "host bits set",
+		"trusted proxy caddy":                      `invalid address "caddy"`,
+		"admin from { }":                           "empty list",
+		"admin from 300.1.1.1":                     `invalid address "300.1.1.1"`,
+		"trusted proxy 10.0.0.1\nno trusted proxy": `"trusted proxy" given twice`,
+	} {
+		if _, err := parseString(t, src+"\n"); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: want error containing %q, got %v", src, want, err)
+		}
 	}
 }

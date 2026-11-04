@@ -1,6 +1,10 @@
 package jellyfin
 
-import "net/http"
+import (
+	"net/http"
+
+	"homeflix/internal/clientaddr"
+)
 
 // QueryResult is Jellyfin's paged list envelope.
 type QueryResult[T any] struct {
@@ -16,6 +20,11 @@ func (s *Server) registerLibrary(rt *Router) {
 // refreshLibrary starts a scan of all libraries. Administrators only.
 func (s *Server) refreshLibrary(w http.ResponseWriter, r *http.Request, sess *Session) {
 	if !sess.User.IsAdmin {
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
+	if !s.adminAllowed(r) {
+		s.Log.Warn("library scan refused outside the admin networks", "user", sess.User.Name, "remote", clientaddr.From(r).String())
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}

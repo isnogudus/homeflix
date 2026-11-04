@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -48,6 +49,11 @@ type Config struct {
 	TMDB *TMDB
 	// Discovery answers clients looking for servers on the local network.
 	Discovery bool
+	// TrustedProxies are the addresses whose X-Forwarded-* headers are
+	// believed, such as Caddy and tailscale serve.
+	TrustedProxies []netip.Prefix
+	// AdminFrom are the networks the admin UI answers from.
+	AdminFrom []netip.Prefix
 
 	Libraries []Library
 
@@ -101,13 +107,26 @@ func Default() Config {
 		SortArticles:    []string{"the", "a", "an"},
 		DisplayLanguage: "en",
 		Discovery:       true,
+		AdminFrom:       DefaultAdminFrom(),
 	}
 }
 
+// DefaultAdminFrom are loopback, the private networks and the tailnet
+// range (Tailscale and headscale hand out 100.64.0.0/10 and fd7a:115c:a1e0::/48,
+// the latter inside fc00::/7).
+func DefaultAdminFrom() []netip.Prefix {
+	var out []netip.Prefix
+	for _, s := range []string{"127.0.0.0/8", "::1/128", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
+		"fc00::/7", "100.64.0.0/10"} {
+		out = append(out, netip.MustParsePrefix(s))
+	}
+	return out
+}
+
 var keywords = []string{
-	"articles", "data", "directory", "discovery", "ffmpeg", "ffprobe", "file", "image", "interval",
-	"language", "level", "library", "listen", "log", "name", "no", "on", "path",
-	"port", "probe", "refresh", "scan", "server", "sort", "tmdb", "token", "workers",
+	"admin", "articles", "data", "directory", "discovery", "ffmpeg", "ffprobe", "file", "from", "image",
+	"interval", "language", "level", "library", "listen", "log", "name", "no", "on", "path",
+	"port", "probe", "proxy", "refresh", "scan", "server", "sort", "tmdb", "token", "trusted", "workers",
 }
 
 // Load reads the configuration file at path; "-" reads standard input. On
@@ -346,6 +365,20 @@ func (p *parser) statement() bool {
 	case p.Accept("no", "discovery"):
 		p.cfg.Discovery = false
 		return p.once("discovery", t.Pos)
+	case p.Accept("trusted", "proxy"):
+		if !p.once("trusted proxy", t.Pos) {
+			return false
+		}
+		return p.List(func() bool { return p.network(&p.cfg.TrustedProxies) })
+	case p.Accept("no", "trusted", "proxy"):
+		p.cfg.TrustedProxies = nil
+		return p.once("trusted proxy", t.Pos)
+	case p.Accept("admin", "from"):
+		if !p.once("admin from", t.Pos) {
+			return false
+		}
+		p.cfg.AdminFrom = nil
+		return p.List(func() bool { return p.network(&p.cfg.AdminFrom) })
 	case p.Is("no") && p.Peek(1).Kind == obsdconf.Word:
 		p.Errorf(t.Pos, "unknown statement %q", "no "+p.Peek(1).Text)
 		return false
@@ -366,6 +399,21 @@ func (p *parser) number(dst *int, min, max uint64) bool {
 	n, ok := p.Number(min, max)
 	if ok {
 		*dst = int(n)
+	}
+	return ok
+}
+
+// network parses an address, taken as a network of one, or a network in
+// CIDR notation, and appends it to dst.
+func (p *parser) network(dst *[]netip.Prefix) bool {
+	if strings.Contains(p.Tok().Text, "/") {
+		pfx, ok := p.Prefix()
+		*dst = append(*dst, pfx)
+		return ok
+	}
+	a, ok := p.Addr()
+	if ok {
+		*dst = append(*dst, netip.PrefixFrom(a, a.BitLen()))
 	}
 	return ok
 }

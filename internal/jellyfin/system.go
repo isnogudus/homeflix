@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"runtime"
 	"strings"
+
+	"homeflix/internal/clientaddr"
 )
 
 // PublicSystemInfo is the unauthenticated server description clients probe
@@ -157,11 +159,6 @@ func (s *Server) brandingConfiguration(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, BrandingOptions{})
 }
 
-// localAddress is the base URL the client reached this server on.
-func localAddress(r *http.Request) string {
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
-	}
-	return scheme + "://" + r.Host
-}
+// localAddress is the base URL the client reached this server on, through
+// a trusted proxy the proxy's.
+func localAddress(r *http.Request) string { return clientaddr.From(r).Origin() }
