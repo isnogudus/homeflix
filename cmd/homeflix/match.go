@@ -36,6 +36,16 @@ func metadataDir(cfg config.Config) string { return filepath.Join(cfg.DataDir, "
 
 // newMetadata returns the metadata service, or nil when TMDB is not
 // configured. Only then is a network client created, for TMDB's hosts.
+// outboundOf returns the network client of a metadata service, for its
+// request counts; nil without TMDB.
+func outboundOf(svc *metadata.Service) *outbound.Client {
+	if svc == nil {
+		return nil
+	}
+	c, _ := svc.TMDB.HTTP.(*outbound.Client)
+	return c
+}
+
 func newMetadata(cfg config.Config, db *store.Store, log *slog.Logger) *metadata.Service {
 	if cfg.TMDB == nil {
 		return nil

@@ -2,74 +2,62 @@ package web
 
 import (
 	"bytes"
+	"fmt"
 	"html/template"
 	"net/http"
+	"time"
 )
 
-// texts are the words of the pages, by language.
-var texts = map[string]map[string]string{
-	"en": {
-		"title":        "homeflix",
-		"username":     "User name",
-		"password":     "Password",
-		"signIn":       "Sign in",
-		"signOut":      "Sign out",
-		"signedInAs":   "Signed in as",
-		"admin":        "Administration",
-		"home":         "Home",
-		"welcome":      "Welcome, %s.",
-		"comingSoon":   "The library comes with the next stage of the web client.",
-		"adminSoon":    "Users, library and metadata come with the next stage of the admin UI.",
-		"yourRequest":  "Your request",
-		"address":      "Address",
-		"via":          "Through a proxy",
-		"origin":       "Address used",
-		"yes":          "yes",
-		"no":           "no",
-		"loginMissing": "Enter your user name.",
-		"loginFailed":  "Wrong user name or password.",
-		"loginLocked":  "Too many failed logins. Try again in 15 minutes.",
-		"adminNetwork": "The administration can only be reached from the home network and the tailnet.",
-		"adminOnly":    "The administration is for administrators only.",
-		"notAllowed":   "Not allowed",
-	},
-	"de": {
-		"title":        "homeflix",
-		"username":     "Benutzername",
-		"password":     "Passwort",
-		"signIn":       "Anmelden",
-		"signOut":      "Abmelden",
-		"signedInAs":   "Angemeldet als",
-		"admin":        "Verwaltung",
-		"home":         "Start",
-		"welcome":      "Willkommen, %s.",
-		"comingSoon":   "Die Bibliothek kommt mit dem nächsten Ausbau des Web-Clients.",
-		"adminSoon":    "Benutzer, Bibliothek und Metadaten kommen mit dem nächsten Ausbau der Verwaltung.",
-		"yourRequest":  "Deine Anfrage",
-		"address":      "Adresse",
-		"via":          "Über einen Proxy",
-		"origin":       "Aufgerufene Adresse",
-		"yes":          "ja",
-		"no":           "nein",
-		"loginMissing": "Bitte den Benutzernamen eingeben.",
-		"loginFailed":  "Benutzername oder Passwort falsch.",
-		"loginLocked":  "Zu viele fehlgeschlagene Anmeldungen. Bitte in 15 Minuten erneut versuchen.",
-		"adminNetwork": "Die Verwaltung ist nur aus dem Heimnetz und dem Tailnet erreichbar.",
-		"adminOnly":    "Die Verwaltung ist nur für Administratoren.",
-		"notAllowed":   "Nicht erlaubt",
-	},
+// funcs are the template functions for a language.
+func funcs(lang string) template.FuncMap {
+	text := func(key string) string {
+		if v, ok := texts[lang][key]; ok {
+			return v
+		}
+		return texts["en"][key]
+	}
+	return template.FuncMap{
+		"t": text,
+		// date writes a time in the server's time zone, "" for none.
+		"date": func(t time.Time) string {
+			if t.IsZero() {
+				return text("never")
+			}
+			if lang == "de" {
+				return t.Local().Format("02.01.2006 15:04")
+			}
+			return t.Local().Format("2006-01-02 15:04")
+		},
+		// dur writes a duration in days, hours and minutes.
+		"dur": func(d time.Duration) string {
+			d = d.Round(time.Minute)
+			days, hours, mins := int(d.Hours())/24, int(d.Hours())%24, int(d.Minutes())%60
+			switch {
+			case days > 0:
+				return fmt.Sprintf("%d d %d h", days, hours)
+			case hours > 0:
+				return fmt.Sprintf("%d h %d min", hours, mins)
+			}
+			return fmt.Sprintf("%d min", mins)
+		},
+		"secs": func(d time.Duration) string {
+			if d < time.Second {
+				return d.Round(time.Millisecond).String()
+			}
+			return d.Round(100 * time.Millisecond).String()
+		},
+	}
 }
 
 // parsePages builds one template set per page from the layout and the
 // page's own file.
 func parsePages() map[string]*template.Template {
 	pages := map[string]*template.Template{}
-	for _, name := range []string{"login", "home", "admin", "error"} {
-		t := template.New("layout.html").Funcs(template.FuncMap{
-			// Filled in per request by render.
-			"t": func(string) string { return "" },
-		})
-		pages[name] = template.Must(t.ParseFS(templateFiles, "templates/layout.html", "templates/"+name+".html"))
+	for _, name := range []string{"login", "home", "error", "admin", "admin_users", "admin_user", "admin_library",
+		"admin_metadata", "admin_movie", "admin_settings"} {
+		t := template.New("layout.html").Funcs(funcs("en"))
+		pages[name] = template.Must(t.ParseFS(templateFiles, "templates/layout.html", "templates/partials.html",
+			"templates/"+name+".html"))
 	}
 	return pages
 }
@@ -85,12 +73,7 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, status int, page
 		s.fail(w, err)
 		return
 	}
-	t.Funcs(template.FuncMap{"t": func(key string) string {
-		if v, ok := texts[lang][key]; ok {
-			return v
-		}
-		return texts["en"][key]
-	}})
+	t.Funcs(funcs(lang))
 	var buf bytes.Buffer
 	if err := t.Execute(&buf, map[string]any{"Lang": lang, "Server": s.ServerName, "Session": sess, "Data": data}); err != nil {
 		s.fail(w, err)

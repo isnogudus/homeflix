@@ -157,9 +157,19 @@ This product uses the TMDB API but is not endorsed or certified by TMDB.
 ## Web pages and remote access
 
 homeflix has web pages of its own: the web client under `/web/` (the
-server address alone leads there) and the admin UI under `/admin/`. They
-are being built in [stage 2](docs/plan-stage2.md); for now they offer
-sign-in and show where a request comes from.
+server address alone leads there) and the admin UI under `/admin/`. The web
+client is being built in [stage 2](docs/plan-stage2.md). The admin UI
+shows the state of the server and does what the `user` and `match`
+commands do:
+
+- overview: library, metadata, requests to TMDB, last scan, and how
+  homeflix sees your request (address, proxy);
+- users: create, set passwords, grant or remove administrator rights,
+  delete, and sign out single devices;
+- library: start a scan, stream survey, probe failures;
+- metadata: movies without metadata, search TMDB and match by hand, or
+  forget a match;
+- settings, read from `homeflix.conf`.
 
 For access from outside, put homeflix behind a reverse proxy that does
 TLS, such as Caddy or `tailscale serve`, and name the proxy in
@@ -172,13 +182,15 @@ and the Jellyfin API alike.
 
 ## Users
 
-Users are managed on the command line; there is no sign-up through the API.
+Users are managed on the command line or in the admin UI; there is no
+sign-up through the API.
 Passwords are read without echo (or as one line from standard input).
 
 ```sh
 homeflix user add anna -admin -config /usr/local/etc/homeflix.conf
 homeflix user passwd anna       # also signs anna out on every device
 homeflix user list              # users with their signed-in devices
+homeflix user admin anna        # administrator rights; -remove takes them back
 homeflix user delete anna
 ```
 

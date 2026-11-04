@@ -1,0 +1,35 @@
+{{define "title"}}{{t "tabLibrary"}}{{end}}
+{{define "content"}}
+{{template "adminnav" .}}
+<div class="grid">
+	<section class="card">
+		<h2>{{t "libraries"}}</h2>
+		<table>
+			<thead><tr><th>{{t "name"}}</th><th>{{t "movies"}}</th></tr></thead>
+			<tbody>{{range .Data.Libraries}}<tr><td>{{.Name}}</td><td>{{.Movies}}</td></tr>{{end}}</tbody>
+		</table>
+	</section>
+	<section class="card">
+		<h2>{{t "scan"}}</h2>
+		{{template "scan" .Data.Scan}}
+		<form method="post" action="/admin/library/scan">{{template "csrf" .}}<button class="primary">{{t "scanNow"}}</button></form>
+		<p class="note">{{t "scanNote"}}</p>
+	</section>
+</div>
+{{with .Data.Stats}}
+<section class="card">
+	<h2>{{t "survey"}}</h2>
+	<p>{{.Movies}} {{t "movies"}}, {{.Extras}} {{t "extras"}}, {{.Files}} {{t "files"}} ({{.Unprobed}} {{t "unprobed"}}, {{len .Failed}} {{t "failed"}})</p>
+	<div class="grid">
+	{{range $.Data.Tables}}
+		<div>
+			<h3>{{t .Title}}</h3>
+			<table class="compact"><tbody>{{range .Rows}}<tr><td class="num">{{.Count}}</td><td>{{.Name}}</td></tr>{{end}}</tbody></table>
+		</div>
+	{{end}}
+	</div>
+	{{if .Failed}}<h3>{{t "probeFailures"}}</h3><ul class="mono">{{range .Failed}}<li>{{.}}</li>{{end}}</ul>{{end}}
+	{{if .NoYear}}<h3>{{t "noYear"}}</h3><ul>{{range .NoYear}}<li>{{.}}</li>{{end}}</ul>{{end}}
+</section>
+{{end}}
+{{end}}

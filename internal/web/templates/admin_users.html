@@ -1,0 +1,31 @@
+{{define "title"}}{{t "tabUsers"}}{{end}}
+{{define "content"}}
+{{template "adminnav" .}}
+<section class="card">
+	<table>
+		<thead><tr><th>{{t "name"}}</th><th>{{t "role"}}</th><th class="wide">{{t "lastLogin"}}</th><th>{{t "lastActivity"}}</th><th>{{t "devices"}}</th></tr></thead>
+		<tbody>
+		{{range .Data.Users}}
+		<tr>
+			<td><a href="/admin/users/{{.ID}}">{{.Name}}</a></td>
+			<td>{{if .IsAdmin}}{{t "roleAdmin"}}{{else}}{{t "roleUser"}}{{end}}</td>
+			<td class="wide">{{date .LastLoginAt}}</td>
+			<td>{{date .LastActivityAt}}</td>
+			<td>{{len .Devices}}</td>
+		</tr>
+		{{end}}
+		</tbody>
+	</table>
+</section>
+<section class="card">
+	<h2>{{t "newUser"}}</h2>
+	<form class="stack" method="post" action="/admin/users">
+		{{template "csrf" .}}
+		<label>{{t "name"}}<input name="name" autocomplete="off" autocapitalize="none" required></label>
+		<label>{{t "password"}}<input name="password" type="password" autocomplete="new-password" required></label>
+		<label>{{t "confirm"}}<input name="confirm" type="password" autocomplete="new-password" required></label>
+		<label class="check"><input type="checkbox" name="admin"> {{t "isAdmin"}}</label>
+		<button class="primary">{{t "create"}}</button>
+	</form>
+</section>
+{{end}}

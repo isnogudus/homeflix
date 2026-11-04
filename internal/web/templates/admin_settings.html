@@ -1,0 +1,10 @@
+{{define "title"}}{{t "tabSettings"}}{{end}}
+{{define "content"}}
+{{template "adminnav" .}}
+<section class="card">
+	<p class="note">{{t "settingsNote"}}</p>
+	<table>
+		<tbody>{{range .Data.Settings}}<tr><th scope="row" class="mono">{{.Name}}</th><td class="mono">{{.Value}}</td></tr>{{end}}</tbody>
+	</table>
+</section>
+{{end}}

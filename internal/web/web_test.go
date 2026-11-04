@@ -54,7 +54,9 @@ type fixture struct {
 	logs *bytes.Buffer
 }
 
-func newFixture(t *testing.T) *fixture {
+// newFixture serves the pages; setup, if given, may fill in more of the
+// server before its handler is made.
+func newFixture(t *testing.T, setup ...func(*Server)) *fixture {
 	t.Helper()
 	db, err := store.Open(context.Background(), t.TempDir())
 	if err != nil {
@@ -74,6 +76,9 @@ func newFixture(t *testing.T) *fixture {
 	s := &Server{ServerName: "Kino", Store: db, Log: slog.New(slog.NewTextHandler(logs, nil)), Logins: lockout.NewGuard(),
 		AdminFrom: []netip.Prefix{netip.MustParsePrefix("192.168.1.0/24"), netip.MustParsePrefix("100.64.0.0/10")},
 		Language:  "de"}
+	for _, f := range setup {
+		f(s)
+	}
 	res := clientaddr.Resolver{Trusted: []netip.Prefix{netip.MustParsePrefix("127.0.0.1/32"), netip.MustParsePrefix("192.168.1.2/32")}}
 	return &fixture{t: t, h: res.Middleware(s.Handler()), db: db, logs: logs}
 }

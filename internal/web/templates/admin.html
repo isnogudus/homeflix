@@ -1,13 +1,46 @@
 {{define "title"}}{{t "admin"}}{{end}}
 {{define "content"}}
-<section class="card">
-	<h1>{{t "admin"}}</h1>
-	<p>{{t "adminSoon"}}</p>
-	<h2>{{t "yourRequest"}}</h2>
-	<dl>
-		<dt>{{t "address"}}</dt><dd>{{.Data.Client.String}}</dd>
-		<dt>{{t "origin"}}</dt><dd>{{.Data.Client.Origin}}</dd>
-		<dt>{{t "via"}}</dt><dd>{{if .Data.Client.Proxy}}{{t "yes"}}{{else}}{{t "no"}}{{end}}</dd>
-	</dl>
-</section>
+{{template "adminnav" .}}
+<div class="grid">
+	<section class="card">
+		<h2>{{t "catalog"}}</h2>
+		<dl>
+			<dt>{{t "movies"}}</dt><dd>{{.Data.Movies}}</dd>
+			<dt>{{t "collections"}}</dt><dd>{{.Data.Collections}}</dd>
+			<dt>{{t "people"}}</dt><dd>{{.Data.People}} ({{.Data.PeopleWithDetails}} {{t "peopleDetails"}})</dd>
+			<dt>{{t "users"}}</dt><dd><a href="/admin/users">{{.Data.Users}}</a></dd>
+			<dt>{{t "sessions"}}</dt><dd>{{.Data.Sessions}}</dd>
+		</dl>
+	</section>
+	<section class="card">
+		<h2>{{t "metadata"}}</h2>
+		{{if .Data.TMDB}}
+		<dl>
+			<dt>{{t "matched"}}</dt><dd>{{.Data.Meta.Matched}}</dd>
+			<dt>{{t "notFound"}}</dt><dd><a href="/admin/metadata">{{.Data.Meta.NotFound}}</a></dd>
+			<dt>{{t "failed"}}</dt><dd>{{.Data.Meta.Failed}}</dd>
+			<dt>{{t "pending"}}</dt><dd>{{.Data.Meta.Pending}}</dd>
+		</dl>
+		{{with .Data.Outbound}}<p>{{t "outbound"}}: {{.OK}} {{t "outboundOK"}}, {{.Failed}} {{t "outboundFailed"}}{{if not .Last.IsZero}}; {{t "lastRequest"}} {{date .Last}}{{end}}.</p>{{end}}
+		{{else}}<p>{{t "tmdbOffNote"}}</p>{{end}}
+	</section>
+	<section class="card">
+		<h2>{{t "scan"}}</h2>
+		{{template "scan" .Data.Scan}}
+		<p><a href="/admin/library">{{t "tabLibrary"}}</a></p>
+	</section>
+	<section class="card">
+		<h2>{{t "server"}}</h2>
+		<dl>
+			<dt>{{t "version"}}</dt><dd>{{.Data.Version}}</dd>
+			{{with .Data.Uptime}}<dt>{{t "uptime"}}</dt><dd>{{dur .}}</dd>{{end}}
+		</dl>
+		<h3>{{t "yourRequest"}}</h3>
+		<dl>
+			<dt>{{t "address"}}</dt><dd class="mono">{{.Data.Client.String}}</dd>
+			<dt>{{t "origin"}}</dt><dd class="mono">{{.Data.Client.Origin}}</dd>
+			<dt>{{t "via"}}</dt><dd>{{if .Data.Client.Proxy}}{{t "yes"}}{{else}}{{t "no"}}{{end}}</dd>
+		</dl>
+	</section>
+</div>
 {{end}}

@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -27,6 +28,60 @@ type Client struct {
 	allowed map[string]bool
 	log     *slog.Logger
 	http    *http.Client
+
+	mu    sync.Mutex
+	hours [24]hourCount // by hour of the day, for Counts
+	last  time.Time
+}
+
+// hourCount counts the requests of one hour.
+type hourCount struct {
+	hour       int64 // Unix time / 3600
+	ok, failed int
+}
+
+// Counts are the requests of the last 24 hours.
+type Counts struct {
+	OK, Failed int
+	Last       time.Time
+}
+
+// Counts returns the requests sent in the last 24 hours: answered with a
+// status below 400, and failed otherwise. Refused requests were never sent
+// and do not count.
+func (c *Client) Counts() Counts {
+	if c == nil {
+		return Counts{}
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := time.Now().Unix() / 3600
+	var out Counts
+	for _, h := range c.hours {
+		if now-h.hour < 24 {
+			out.OK += h.ok
+			out.Failed += h.failed
+		}
+	}
+	out.Last = c.last
+	return out
+}
+
+func (c *Client) count(ok bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := time.Now()
+	h := now.Unix() / 3600
+	b := &c.hours[h%24]
+	if b.hour != h {
+		*b = hourCount{hour: h}
+	}
+	if ok {
+		b.ok++
+	} else {
+		b.failed++
+	}
+	c.last = now
 }
 
 // New returns a client for the given host names. Without hosts every
@@ -79,11 +134,12 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 	}
 	start := time.Now()
 	resp, err := c.http.Do(req)
+	status := 0
+	if resp != nil {
+		status = resp.StatusCode
+	}
+	c.count(err == nil && status < 400)
 	if c.log != nil {
-		status := 0
-		if resp != nil {
-			status = resp.StatusCode
-		}
 		c.log.Debug("outbound request", "method", req.Method, "host", host, "path", req.URL.Path,
 			"status", status, "duration", time.Since(start).Round(time.Millisecond), "err", err)
 	}

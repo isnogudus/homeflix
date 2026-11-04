@@ -24,6 +24,7 @@ const userUsage = `Usage: homeflix user <subcommand> [flags] [name]
 Subcommands:
   add <name>      create a user (-admin for an administrator)
   passwd <name>   set a new password; signs the user out everywhere
+  admin <name>    make a user an administrator (-remove to take it back)
   delete <name>   delete a user with its sessions and preferences
   list            list users and their sessions
 
@@ -49,9 +50,12 @@ func userCommand(args []string, cio cliIO) error {
 	fs.SetOutput(cio.stderr)
 	fs.Usage = func() { fmt.Fprint(cio.stderr, userUsage) }
 	configPath := fs.String("config", defaultConfigPath, "configuration file")
-	admin := false
-	if sub == "add" {
+	admin, remove := false, false
+	switch sub {
+	case "add":
 		fs.BoolVar(&admin, "admin", false, "make the user an administrator")
+	case "admin":
+		fs.BoolVar(&remove, "remove", false, "take administrator rights back")
 	}
 	names, err := parseInterspersed(fs, args[1:])
 	if err != nil {
@@ -62,7 +66,7 @@ func userCommand(args []string, cio cliIO) error {
 		wantNames = 0
 	}
 	switch sub {
-	case "add", "passwd", "delete", "list":
+	case "add", "passwd", "admin", "delete", "list":
 	default:
 		fmt.Fprint(cio.stderr, userUsage)
 		return fmt.Errorf("unknown user subcommand %q", sub)
@@ -123,6 +127,19 @@ func userCommand(args []string, cio cliIO) error {
 			return err
 		}
 		fmt.Fprintf(cio.stdout, "password changed for %q; all sessions signed out\n", u.Name)
+	case "admin":
+		u, err := db.UserByName(ctx, names[0])
+		if err != nil {
+			return fmt.Errorf("user %q: %w", names[0], err)
+		}
+		if err := db.SetAdmin(ctx, u.ID, !remove); err != nil {
+			return err
+		}
+		if remove {
+			fmt.Fprintf(cio.stdout, "%q is no administrator any more\n", u.Name)
+		} else {
+			fmt.Fprintf(cio.stdout, "%q is an administrator\n", u.Name)
+		}
 	case "delete":
 		u, err := db.UserByName(ctx, names[0])
 		if err != nil {

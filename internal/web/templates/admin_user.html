@@ -1,0 +1,68 @@
+{{define "title"}}{{.Data.User.Name}}{{end}}
+{{define "content"}}
+{{template "adminnav" .}}
+{{$ := .}}
+{{with .Data.User}}
+<section class="card">
+	<h1>{{.Name}}</h1>
+	{{if $.Data.Self}}<p class="note">{{t "ownAccount"}}</p>{{end}}
+	<dl>
+		<dt>{{t "role"}}</dt><dd>{{if .IsAdmin}}{{t "roleAdmin"}}{{else}}{{t "roleUser"}}{{end}}</dd>
+		<dt>{{t "lastLogin"}}</dt><dd>{{date .LastLoginAt}}</dd>
+		<dt>{{t "lastActivity"}}</dt><dd>{{date .LastActivityAt}}</dd>
+	</dl>
+</section>
+<section class="card">
+	<h2>{{t "devices"}}</h2>
+	{{if .Devices}}
+	<table>
+		<thead><tr><th>{{t "device"}}</th><th class="wide">{{t "client"}}</th><th class="wide">{{t "since"}}</th><th>{{t "lastSeen"}}</th><th class="wide">{{t "from"}}</th><th></th></tr></thead>
+		<tbody>
+		{{range .Devices}}
+		<tr>
+			<td>{{.DeviceName}}{{if eq .SessionID $.Data.OwnSession}} ({{t "thisSession"}}){{end}}</td>
+			<td class="wide">{{.Client}} {{.ClientVersion}}</td>
+			<td class="wide">{{date .CreatedAt}}</td>
+			<td>{{date .LastSeenAt}}</td>
+			<td class="mono wide">{{.RemoteAddr}}</td>
+			<td><form method="post" action="/admin/users/{{.UserID}}/sessions/{{.SessionID}}/end">{{template "csrf" $}}<button>{{t "endSession"}}</button></form></td>
+		</tr>
+		{{end}}
+		</tbody>
+	</table>
+	{{else}}<p>{{t "noDevices"}}</p>{{end}}
+</section>
+<div class="grid">
+	<section class="card">
+		<h2>{{t "setPassword"}}</h2>
+		<form class="stack" method="post" action="/admin/users/{{.ID}}/password">
+			{{template "csrf" $}}
+			<label>{{t "password"}}<input name="password" type="password" autocomplete="new-password" required></label>
+			<label>{{t "confirm"}}<input name="confirm" type="password" autocomplete="new-password" required></label>
+			<p class="note">{{t "setPasswordNote"}}</p>
+			<button>{{t "setPassword"}}</button>
+		</form>
+	</section>
+	<section class="card">
+		<h2>{{t "rights"}}</h2>
+		<form class="stack" method="post" action="/admin/users/{{.ID}}/admin">
+			{{template "csrf" $}}
+			<label class="check"><input type="checkbox" name="admin"{{if .IsAdmin}} checked{{end}}{{if $.Data.Self}} disabled{{end}}> {{t "isAdmin"}}</label>
+			<p class="note">{{t "rightsNote"}}</p>
+			{{if not $.Data.Self}}<button>{{t "save"}}</button>{{end}}
+		</form>
+	</section>
+	{{if not $.Data.Self}}
+	<section class="card">
+		<h2>{{t "deleteUser"}}</h2>
+		<form class="stack" method="post" action="/admin/users/{{.ID}}/delete">
+			{{template "csrf" $}}
+			<label>{{t "name"}}<input name="confirm" autocomplete="off" required></label>
+			<p class="note">{{t "deleteNote"}}</p>
+			<button class="danger">{{t "delete"}}</button>
+		</form>
+	</section>
+	{{end}}
+</div>
+{{end}}
+{{end}}

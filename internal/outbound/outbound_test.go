@@ -44,3 +44,23 @@ func TestRefusesHostsNotAllowed(t *testing.T) {
 		t.Errorf("allowed host not dialled: dials %d, err %v", dials, err)
 	}
 }
+
+func TestCounts(t *testing.T) {
+	old := dial
+	dial = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return nil, errors.New("dial blocked by test")
+	}
+	defer func() { dial = old }()
+	c := New(nil, "api.example.org")
+	for _, u := range []string{"https://api.example.org/a", "https://api.example.org/b", "https://other.example.org/c"} {
+		req, _ := http.NewRequest("GET", u, nil)
+		c.Do(req)
+	}
+	if got := c.Counts(); got.OK != 0 || got.Failed != 2 || got.Last.IsZero() {
+		t.Errorf("counts: %+v", got)
+	}
+	var none *Client
+	if got := none.Counts(); got != (Counts{}) {
+		t.Errorf("nil client: %+v", got)
+	}
+}

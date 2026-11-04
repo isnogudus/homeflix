@@ -153,6 +153,11 @@ func (s *Store) SetPassword(ctx context.Context, userID, passwordHash string) er
 	return tx.Commit()
 }
 
+// SetAdmin grants or removes administrator rights.
+func (s *Store) SetAdmin(ctx context.Context, userID string, admin bool) error {
+	return expectOne(s.db.ExecContext(ctx, "UPDATE users SET is_admin = ? WHERE id = ?", admin, userID))
+}
+
 // DeleteUser removes a user together with its tokens and preferences.
 func (s *Store) DeleteUser(ctx context.Context, userID string) error {
 	return expectOne(s.db.ExecContext(ctx, "DELETE FROM users WHERE id = ?", userID))
@@ -241,6 +246,11 @@ func (s *Store) TouchToken(ctx context.Context, hash, remoteAddr string, at time
 // DeleteToken revokes a token.
 func (s *Store) DeleteToken(ctx context.Context, hash string) error {
 	return expectOne(s.db.ExecContext(ctx, "DELETE FROM tokens WHERE token_hash = ?", hash))
+}
+
+// DeleteSession revokes the token of one session of a user.
+func (s *Store) DeleteSession(ctx context.Context, userID, sessionID string) error {
+	return expectOne(s.db.ExecContext(ctx, "DELETE FROM tokens WHERE user_id = ? AND session_id = ?", userID, sessionID))
 }
 
 // Tokens lists tokens, newest activity first. An empty userID lists all.

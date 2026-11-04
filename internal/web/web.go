@@ -14,8 +14,11 @@ import (
 	"strings"
 	"time"
 
+	"homeflix/internal/catalog"
 	"homeflix/internal/clientaddr"
 	"homeflix/internal/lockout"
+	"homeflix/internal/metadata"
+	"homeflix/internal/outbound"
 	"homeflix/internal/store"
 )
 
@@ -40,6 +43,19 @@ type Server struct {
 	// FailedLoginDelay slows down password guessing.
 	FailedLoginDelay time.Duration
 
+	// For the admin UI:
+	Version string
+	Started time.Time
+	Catalog *catalog.Catalog
+	// Metadata and Outbound are nil when TMDB is off.
+	Metadata    *metadata.Service
+	Outbound    *outbound.Client
+	RequestScan func()
+	ScanStatus  func() ScanStatus
+	// Reload rebuilds the catalog after a match changed.
+	Reload   func()
+	Settings []Setting
+
 	pages map[string]*template.Template
 }
 
@@ -54,8 +70,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /web/logout", s.signedIn(s.logout))
 	static, _ := fs.Sub(staticFiles, "static")
 	mux.Handle("GET /web/static/", http.StripPrefix("/web/static/", staticHandler(static)))
-	mux.HandleFunc("GET /admin", redirect("/admin/"))
-	mux.HandleFunc("GET /admin/{$}", s.signedIn(s.admin(s.adminHome)))
+	s.registerAdmin(mux)
 	return securityHeaders(sameOrigin(mux))
 }
 
@@ -135,9 +150,4 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request, sess *session) {
 	s.render(w, r, http.StatusOK, "home", sess, map[string]any{
 		"AdminLink": sess.User.IsAdmin && s.adminAllowed(r),
 	})
-}
-
-func (s *Server) adminHome(w http.ResponseWriter, r *http.Request, sess *session) {
-	info := clientaddr.From(r)
-	s.render(w, r, http.StatusOK, "admin", sess, map[string]any{"Client": info})
 }

@@ -183,10 +183,17 @@ func serve(args []string, stdout, stderr io.Writer) error {
 	}
 	scanner := newScanner(cfg, db, log)
 	scanTrigger := make(chan struct{}, 1)
+	requestScan := func() {
+		select {
+		case scanTrigger <- struct{}{}:
+		default:
+		}
+	}
+	scans := &scanTracker{}
 	background.Add(1)
 	go func() {
 		defer background.Done()
-		runScans(ctx, scanner, cfg.ScanInterval, scanTrigger, log, func(rep library.Report) {
+		runScans(ctx, scanner, cfg.ScanInterval, scanTrigger, log, scans, func(rep library.Report) {
 			if rep.Changed() {
 				reload()
 			}
@@ -247,13 +254,17 @@ func serve(args []string, stdout, stderr io.Writer) error {
 			AdminFrom:        cfg.AdminFrom,
 			Language:         cfg.DisplayLanguage,
 			FailedLoginDelay: time.Second,
+			Version:          version,
+			Started:          time.Now(),
+			Catalog:          cat,
+			Metadata:         meta,
+			Outbound:         outboundOf(meta),
+			RequestScan:      requestScan,
+			ScanStatus:       scans.status,
+			Reload:           reload,
+			Settings:         settingsOf(cfg, *configPath),
 		}).Handler(),
-		RequestScan: func() {
-			select {
-			case scanTrigger <- struct{}{}:
-			default:
-			}
-		},
+		RequestScan: requestScan,
 	}
 	httpServer := &http.Server{
 		Handler:           api.Handler(),
@@ -344,20 +355,24 @@ func watchCatalogVersion(ctx context.Context, db *store.Store, reload func(), lo
 // whenever trigger fires, until ctx is done. done is called after every
 // completed scan.
 func runScans(ctx context.Context, sc *library.Scanner, interval time.Duration, trigger <-chan struct{},
-	log *slog.Logger, done func(library.Report)) {
+	log *slog.Logger, scans *scanTracker, done func(library.Report)) {
 	scan := func(reason string) {
 		log.Info("library scan started", "reason", reason)
+		scans.start(reason)
 		rep, err := sc.Scan(ctx)
 		switch {
 		case ctx.Err() != nil:
 			log.Info("library scan interrupted")
+			scans.cancel()
 			return
 		case errors.Is(err, library.ErrScanRunning):
 			log.Info("library scan skipped: another scan is running")
+			scans.cancel()
 			return
 		case err != nil:
 			log.Error("library scan failed", "err", err)
 		}
+		scans.finish(rep, err)
 		for _, l := range rep.Libraries {
 			log.Info("library scanned", "library", l.Name, "movies", l.Movies, "added", l.Added,
 				"updated", l.Updated, "moved", l.Moved, "returned", l.Returned, "missing", l.Missing,

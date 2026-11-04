@@ -1,0 +1,35 @@
+{{define "title"}}{{t "tabMetadata"}}{{end}}
+{{define "content"}}
+{{template "adminnav" .}}
+<section class="card">
+	{{if not .Data.TMDB}}<p class="note">{{t "tmdbOffNote"}}</p>{{end}}
+	<p>{{.Data.Counts.Matched}} {{t "matched"}}, {{.Data.Counts.NotFound}} {{t "notFound"}}, {{.Data.Counts.Failed}} {{t "failed"}}, {{.Data.Counts.Pending}} {{t "pending"}}</p>
+	<div class="toolbar">
+		<nav class="pills">
+			<a href="/admin/metadata"{{if not .Data.ShowAll}} aria-current="page"{{end}}>{{t "unmatched"}}</a>
+			<a href="/admin/metadata?show=all"{{if and .Data.ShowAll (not .Data.Query)}} aria-current="page"{{end}}>{{t "allMovies"}}</a>
+		</nav>
+		<form class="inline" method="get" action="/admin/metadata">
+			<input name="q" value="{{.Data.Query}}" type="search" aria-label="{{t "title"}}">
+			<button>{{t "search"}}</button>
+		</form>
+	</div>
+	{{if .Data.Movies}}
+	<table>
+		<thead><tr><th>{{t "title"}}</th><th>{{t "year"}}</th><th>{{t "state"}}</th><th class="wide">{{t "tmdbTitle"}}</th></tr></thead>
+		<tbody>
+		{{range .Data.Movies}}
+		<tr>
+			<td><a href="/admin/metadata/{{.ID}}">{{.Title}}</a></td>
+			<td>{{if .Year}}{{.Year}}{{end}}</td>
+			<td>{{template "metastate" .}}</td>
+			<td class="wide">{{.TMDBTitle}}</td>
+		</tr>
+		{{end}}
+		</tbody>
+	</table>
+	{{with .Data.More}}<p class="note">{{printf (t "moreMovies") .}}</p>{{end}}
+	{{else if not .Data.ShowAll}}<p>{{t "allMatched"}}</p>
+	{{else}}<p>{{t "noResults"}}</p>{{end}}
+</section>
+{{end}}

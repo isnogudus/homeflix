@@ -122,3 +122,37 @@ func TestDisplayPrefs(t *testing.T) {
 		t.Errorf("prefs survived user deletion: %v", err)
 	}
 }
+
+func TestAdminFlagAndSessions(t *testing.T) {
+	ctx := context.Background()
+	s := openTemp(t, t.TempDir())
+	u, err := s.CreateUser(ctx, "anna", "hash", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetAdmin(ctx, u.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.UserByID(ctx, u.ID); !got.IsAdmin {
+		t.Error("admin flag not set")
+	}
+	if err := s.SetAdmin(ctx, "nobody", true); !errors.Is(err, ErrNotFound) {
+		t.Errorf("unknown user: %v", err)
+	}
+	now := time.Now().UTC()
+	for _, id := range []string{"s1", "s2"} {
+		if err := s.CreateToken(ctx, Token{Hash: "h" + id, SessionID: id, UserID: u.ID, DeviceID: "d" + id,
+			DeviceName: "x", Client: "c", CreatedAt: now, LastSeenAt: now}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.DeleteSession(ctx, u.ID, "s1"); err != nil {
+		t.Fatal(err)
+	}
+	if toks, _ := s.Tokens(ctx, u.ID); len(toks) != 1 || toks[0].SessionID != "s2" {
+		t.Errorf("tokens after ending s1: %+v", toks)
+	}
+	if err := s.DeleteSession(ctx, "other", "s2"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("session of another user: %v", err)
+	}
+}

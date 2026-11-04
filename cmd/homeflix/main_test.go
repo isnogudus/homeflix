@@ -80,6 +80,15 @@ func TestUserCommands(t *testing.T) {
 	if _, err := user("newpw\n", "passwd", "BERT"); err != nil {
 		t.Errorf("passwd: %v", err)
 	}
+	if out, err := user("", "admin", "bert"); err != nil || !strings.Contains(out, `"bert" is an administrator`) {
+		t.Errorf("admin: %q, %v", out, err)
+	}
+	if out, err := user("", "admin", "-remove", "bert"); err != nil || !strings.Contains(out, "no administrator any more") {
+		t.Errorf("admin -remove: %q, %v", out, err)
+	}
+	if _, err := user("", "admin", "nobody"); err == nil {
+		t.Error("admin of an unknown user: want error")
+	}
 	out, err := user("", "list")
 	if err != nil || !strings.Contains(out, "anna") || !strings.Contains(out, "admin") || !strings.Contains(out, "bert") {
 		t.Errorf("list: %q, %v", out, err)

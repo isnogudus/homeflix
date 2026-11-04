@@ -1,0 +1,67 @@
+{{define "title"}}{{.Data.Movie.Title}}{{end}}
+{{define "content"}}
+{{template "adminnav" .}}
+{{$ := .}}
+<div class="grid">
+	<section class="card">
+		<h1>{{.Data.Movie.Title}}{{if .Data.Movie.Year}} ({{.Data.Movie.Year}}){{end}}</h1>
+		<dl>
+			<dt>{{t "path"}}</dt><dd class="mono">{{.Data.Movie.Path}}</dd>
+			<dt>{{t "imdbFromName"}}</dt><dd>{{with .Data.Movie.IMDbID}}{{.}}{{else}}–{{end}}</dd>
+			<dt>{{t "state"}}</dt><dd>{{template "metastate" .Data}}{{if and .Data.HasMeta .Data.Meta.Error}}: {{.Data.Meta.Error}}{{end}}</dd>
+		</dl>
+	</section>
+	<section class="card">
+		<h2>{{t "currentMatch"}}</h2>
+		{{if and .Data.HasMeta (eq .Data.Meta.Status "matched")}}
+		<dl>
+			<dt>{{t "title"}}</dt><dd>{{.Data.TMDBMovie.Title}}{{with .Data.TMDBMovie.ReleaseDate}} ({{.}}){{end}}</dd>
+			<dt>TMDB</dt><dd><a href="https://www.themoviedb.org/movie/{{.Data.Meta.TMDbID}}" target="_blank" rel="noopener noreferrer">{{.Data.Meta.TMDbID}}</a></dd>
+			<dt>{{t "matchSource"}}</dt><dd>{{t (printf "source_%s" .Data.Meta.Source)}}</dd>
+		</dl>
+		{{else}}<p>{{t "noMatch"}}</p>{{end}}
+		{{if .Data.HasMeta}}
+		<form class="stack" method="post" action="/admin/metadata/{{.Data.Movie.ID}}/clear">
+			{{template "csrf" .}}
+			<p class="note">{{t "clearNote"}}</p>
+			<button>{{t "clearMatch"}}</button>
+		</form>
+		{{end}}
+	</section>
+</div>
+{{if .Data.TMDB}}
+<section class="card">
+	<h2>{{t "searchTMDB"}}</h2>
+	<form class="inline" method="get" action="/admin/metadata/{{.Data.Movie.ID}}">
+		<label>{{t "title"}}<input name="q" value="{{.Data.Query}}" type="search"></label>
+		<label>{{t "year"}}<input name="year" value="{{.Data.Year}}" inputmode="numeric" size="5"></label>
+		<button class="primary">{{t "search"}}</button>
+	</form>
+	{{if .Data.Searched}}
+	<h3>{{t "results"}}</h3>
+	{{if .Data.Results}}
+	<table>
+		<thead><tr><th>{{t "title"}}</th><th>{{t "year"}}</th><th class="wide">TMDB</th><th></th></tr></thead>
+		<tbody>
+		{{range .Data.Results}}
+		<tr>
+			<td>{{.Title}}{{if and .OriginalTitle (ne .OriginalTitle .Title)}} <span class="note">({{.OriginalTitle}})</span>{{end}}</td>
+			<td>{{if .Year}}{{.Year}}{{end}}</td>
+			<td class="wide"><a href="https://www.themoviedb.org/movie/{{.ID}}" target="_blank" rel="noopener noreferrer">{{.ID}}</a></td>
+			<td><form method="post" action="/admin/metadata/{{$.Data.Movie.ID}}/match">{{template "csrf" $}}<input type="hidden" name="tmdb_id" value="{{.ID}}"><button>{{t "takeThis"}}</button></form></td>
+		</tr>
+		{{end}}
+		</tbody>
+	</table>
+	{{else}}<p>{{t "noResults"}}</p>{{end}}
+	{{end}}
+	<h3>{{t "byID"}}</h3>
+	<form class="inline" method="post" action="/admin/metadata/{{.Data.Movie.ID}}/match">
+		{{template "csrf" .}}
+		<label>TMDB-ID<input name="tmdb_id" inputmode="numeric" size="8" required></label>
+		<button>{{t "match"}}</button>
+	</form>
+	<p class="note">{{t "byIDNote"}}</p>
+</section>
+{{end}}
+{{end}}

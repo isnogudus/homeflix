@@ -1,0 +1,33 @@
+{{define "csrf"}}<input type="hidden" name="csrf" value="{{.Session.CSRF}}">{{end}}
+
+{{define "adminnav"}}
+<nav class="tabs" aria-label="{{t "admin"}}">
+	<a href="/admin/"{{if eq .Data.Tab "overview"}} aria-current="page"{{end}}>{{t "tabOverview"}}</a>
+	<a href="/admin/users"{{if eq .Data.Tab "users"}} aria-current="page"{{end}}>{{t "tabUsers"}}</a>
+	<a href="/admin/library"{{if eq .Data.Tab "library"}} aria-current="page"{{end}}>{{t "tabLibrary"}}</a>
+	<a href="/admin/metadata"{{if eq .Data.Tab "metadata"}} aria-current="page"{{end}}>{{t "tabMetadata"}}</a>
+	<a href="/admin/settings"{{if eq .Data.Tab "settings"}} aria-current="page"{{end}}>{{t "tabSettings"}}</a>
+</nav>
+{{with .Data.Ok}}<p class="flash ok" role="status">{{t .}}</p>{{end}}
+{{with .Data.Err}}<p class="flash err" role="alert">{{t .}}</p>{{end}}
+{{end}}
+
+{{define "metastate"}}{{if not .HasMeta}}{{t "pending"}}{{else if eq .Meta.Status "matched"}}{{t "matched"}}{{else if eq .Meta.Status "not_found"}}{{t "notFound"}}{{else if eq .Meta.Status "manual"}}{{t "pending"}}{{else}}{{t "failed"}}{{end}}{{end}}
+
+{{define "scan"}}
+{{with .}}
+	{{if .Running}}<p class="note">{{t "scanRunning"}}</p>{{end}}
+	{{if .Finished.IsZero}}{{if not .Running}}<p>{{t "scanNone"}}</p>{{end}}{{else}}
+	<dl>
+		<dt>{{t "started"}}</dt><dd>{{date .Started}}</dd>
+		<dt>{{t "scanReason"}}</dt><dd>{{t (printf "reason_%s" .Reason)}}</dd>
+		<dt>{{t "scanTook"}}</dt><dd>{{secs .Report.Took}}</dd>
+		<dt>{{t "scanChanges"}}</dt><dd>
+			{{range .Report.Libraries}}{{.Name}}: {{.Movies}} {{t "movies"}}, {{.Added}} {{t "added"}}, {{.Updated}} {{t "updated"}}, {{.Missing}} {{t "missing"}}<br>{{end}}
+			{{.Report.Probed}} {{t "probed"}}, {{.Report.ProbeFailed}} {{t "probeFailed"}}
+		</dd>
+		{{with .Err}}<dt>{{t "failed"}}</dt><dd class="error">{{.}}</dd>{{end}}
+	</dl>
+	{{end}}
+{{else}}<p>{{t "scanNone"}}</p>{{end}}
+{{end}}
