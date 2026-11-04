@@ -132,7 +132,10 @@ first 20 actors, and once per film series that two or more movies belong
 to, its name, overview, poster and backdrop, asking by TMDB's own IDs.
 Nothing else leaves the host. The first run over a large library takes a
 while: 1,700 movies list about 22,000 people, which takes some 70 minutes
-at ten requests a second and about 1 GB for the portraits.
+at ten requests a second and about 1 GB for the portraits. After the
+`refresh interval` (90 days by default) the details are fetched again for
+the same TMDB entries, spread over a month, so that ratings, biographies
+and artwork stay current; a refresh that fails keeps what was there.
 
 All network access goes through `internal/outbound`, which only reaches the
 hosts it was created for; a test fails if any other code opens connections.

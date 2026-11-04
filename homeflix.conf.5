@@ -197,8 +197,10 @@ and death, and portrait of the directors, writers and first 20 actors of
 each movie, and the name, overview and artwork of every film series that
 two or more movies of the libraries belong to, asking TMDB by its own IDs
 of people and series.
-A movie is looked up again only when its file name changes; a movie,
+A movie is matched again only when its file name changes; a movie,
 person or series that was not found is retried after 30 days.
+What was found is fetched again after the
+.Ic refresh interval .
 The block holds:
 .Bl -tag -width Ds
 .It Ic token file Ar path
@@ -221,6 +223,16 @@ with
 and
 .Cm en-US
 otherwise.
+.It Ic refresh interval Ar duration
+How old the details of a movie, person or series get before they are
+fetched again for the same TMDB entry, from 7 days to 365 days.
+Ratings, biographies, dates and artwork change at TMDB.
+Each entry waits up to a third of the interval longer, so that what was
+fetched in one run is refreshed over weeks, not at once.
+A refresh that fails keeps the details fetched before.
+The default is 90 days.
+.It Ic no refresh
+Keep the details as first fetched.
 .El
 .Pp
 .Ic homeflix match

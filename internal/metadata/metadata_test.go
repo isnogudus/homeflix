@@ -511,3 +511,83 @@ func TestCollectionsAndRefresh(t *testing.T) {
 		t.Errorf("collection poster kept: %v", err)
 	}
 }
+
+func TestRefresh(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	f.svc.RefreshAfter = 90 * 24 * time.Hour
+	f.add("arrival", "Arrival", 2016, "tt2543164")
+	f.update()
+
+	// Not yet due: only the person TMDB did not know is tried again, as
+	// every 30 days.
+	f.now = f.now.Add(89 * 24 * time.Hour)
+	if rep := f.update(); rep.Matched+rep.People != 0 || rep.PeopleNotFound != 1 {
+		t.Errorf("before the refresh is due: %+v", rep)
+	}
+	// Due for every entry after the interval and its spread of a third.
+	f.now = f.now.Add(32 * 24 * time.Hour)
+	f.fake.take()
+	if rep := f.update(); rep.Matched != 1 || rep.People != 2 || rep.PeopleNotFound != 1 {
+		t.Errorf("refresh: %+v", rep)
+	}
+	for _, r := range f.fake.take() {
+		if strings.HasPrefix(r, "/3/find/") || strings.HasPrefix(r, "/3/search/") {
+			t.Errorf("refresh matched again: %s", r)
+		}
+	}
+	if md, _ := f.meta("arrival"); md.Status != store.MetaMatched || !md.FetchedAt.Equal(f.now) || md.Source != "imdb" {
+		t.Errorf("after refresh: %+v", md)
+	}
+
+	// A refresh that fails keeps the data, and waits for the next interval.
+	f.now = f.now.Add(121 * 24 * time.Hour)
+	f.fake.fail = true
+	rep := f.update()
+	if rep.Failed != 1 || rep.PeopleFailed != 3 {
+		t.Errorf("failing refresh: %+v", rep)
+	}
+	md, m := f.meta("arrival")
+	if md.Status != store.MetaMatched || m.Overview != "Außerirdische landen." || !md.FetchedAt.Equal(f.now) {
+		t.Errorf("data lost by a failing refresh: %+v %+v", md, m)
+	}
+	if p, _ := f.store.AllPeople(ctx); p[9273].Status != store.MetaMatched || p[9273].Photo == "" {
+		t.Errorf("person lost by a failing refresh: %+v", p[9273])
+	}
+	f.fake.fail = false
+	f.fake.take()
+	f.now = f.now.Add(time.Hour)
+	if rep := f.update(); rep.Changed() {
+		t.Errorf("retried right after a failed refresh: %+v", rep)
+	}
+
+	// No refresh at all with RefreshAfter 0.
+	f.svc.RefreshAfter = 0
+	f.now = f.now.Add(1000 * 24 * time.Hour)
+	if rep := f.update(); rep.Matched+rep.People != 0 {
+		t.Errorf("refreshed without RefreshAfter: %+v", rep)
+	}
+}
+
+func TestRefreshSpread(t *testing.T) {
+	now := time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC)
+	s := &Service{RefreshAfter: 90 * 24 * time.Hour, Now: func() time.Time { return now }}
+	due := func(age time.Duration) int {
+		n := 0
+		for i := range 1000 {
+			if s.refreshDue(fmt.Sprint("person:", i), now.Add(-age)) {
+				n++
+			}
+		}
+		return n
+	}
+	if n := due(89 * 24 * time.Hour); n != 0 {
+		t.Errorf("%d due before the interval", n)
+	}
+	if n := due(105 * 24 * time.Hour); n < 300 || n > 700 {
+		t.Errorf("%d of 1000 due half way through the spread", n)
+	}
+	if n := due(121 * 24 * time.Hour); n != 1000 {
+		t.Errorf("%d of 1000 due after the spread", n)
+	}
+}

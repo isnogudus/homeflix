@@ -26,6 +26,7 @@
 #tmdb {
 #	token file "/usr/local/etc/homeflix-tmdb.token"
 #	language de-DE
+#	refresh interval 90d		# fetch details again; or: no refresh
 #}
 
 # A movie is a single file, a set of "part1", "part2" files, or a folder

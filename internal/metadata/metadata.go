@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"log/slog"
 	"os"
 	"path"
@@ -53,7 +54,10 @@ type Service struct {
 	// LockPath, if set, is locked during an update so that only one process
 	// updates a data directory at a time.
 	LockPath string
-	Now      func() time.Time
+	// RefreshAfter is how old matched metadata gets before it is fetched
+	// again; 0 keeps it as first fetched.
+	RefreshAfter time.Duration
+	Now          func() time.Time
 
 	mu sync.Mutex
 }
@@ -80,6 +84,19 @@ func (s *Service) now() time.Time {
 	return time.Now().UTC()
 }
 
+// refreshDue reports whether metadata fetched at a time is due again. Each
+// key waits up to a third of RefreshAfter longer, so that what was fetched
+// in one run is refreshed over weeks instead of in one burst.
+func (s *Service) refreshDue(key string, fetched time.Time) bool {
+	if s.RefreshAfter <= 0 {
+		return false
+	}
+	h := fnv.New64a()
+	h.Write([]byte(key))
+	spread := time.Duration(h.Sum64() % uint64(s.RefreshAfter/3+1))
+	return s.now().Sub(fetched) >= s.RefreshAfter+spread
+}
+
 // MatchKey is the file name data a match is made for.
 func MatchKey(it store.Item) string {
 	return fmt.Sprintf("%s|%s|%d", it.IMDbID, catalog.SearchKey(it.Title), it.Year)
@@ -104,6 +121,9 @@ func (s *Service) needsUpdate(it store.Item, md store.Metadata, ok bool) bool {
 			Version int `json:"v"`
 		}
 		if json.Unmarshal([]byte(md.Data), &v) != nil || v.Version < tmdb.DataVersion {
+			return true
+		}
+		if s.refreshDue("movie:"+md.ItemID, md.FetchedAt) {
 			return true
 		}
 		// Artwork removed from the cache is fetched again.
@@ -311,7 +331,7 @@ type lookupState struct {
 }
 
 // needsLookup reports whether a person or collection has to be looked up.
-func (s *Service) needsLookup(st lookupState, ok bool) bool {
+func (s *Service) needsLookup(key string, st lookupState, ok bool) bool {
 	switch {
 	case !ok:
 		return true
@@ -319,6 +339,8 @@ func (s *Service) needsLookup(st lookupState, ok bool) bool {
 		return s.now().Sub(st.fetched) >= retryErrors
 	case st.status == store.MetaNotFound:
 		return s.now().Sub(st.fetched) >= retryNotFound
+	case s.refreshDue(key, st.fetched):
+		return true
 	}
 	// Artwork removed from the cache is fetched again.
 	for _, f := range st.files {
@@ -349,7 +371,7 @@ func (s *Service) updateSet(ctx context.Context, what string, wanted map[int]boo
 		}
 	}
 	for id := range wanted {
-		if st, ok := have[id]; s.needsLookup(st, ok) {
+		if st, ok := have[id]; s.needsLookup(what+":"+strconv.Itoa(id), st, ok) {
 			todo = append(todo, id)
 		}
 	}
@@ -412,7 +434,11 @@ func (s *Service) updatePeople(ctx context.Context, rep *Report) error {
 	}
 	c, err := s.updateSet(ctx, "people", peopleOf(movies), have, s.Store.DeletePeople,
 		func(ctx context.Context, id int) (string, string, error) {
-			p, err := s.lookupPerson(ctx, id)
+			var prev *store.Person
+			if p, ok := people[id]; ok {
+				prev = &p
+			}
+			p, err := s.lookupPerson(ctx, id, prev)
 			return p.Status, p.Error, err
 		})
 	rep.People, rep.PeopleNotFound, rep.PeopleFailed = c.fetched, c.notFound, c.failed
@@ -430,7 +456,11 @@ func (s *Service) updatePeople(ctx context.Context, rep *Report) error {
 	}
 	c, err = s.updateSet(ctx, "collections", collectionsOf(movies), have, s.Store.DeleteCollections,
 		func(ctx context.Context, id int) (string, string, error) {
-			col, err := s.lookupCollection(ctx, id)
+			var prev *store.Collection
+			if c, ok := cols[id]; ok {
+				prev = &c
+			}
+			col, err := s.lookupCollection(ctx, id, prev)
 			return col.Status, col.Error, err
 		})
 	rep.Collections, rep.CollectionsNotFound, rep.CollectionsFailed = c.fetched, c.notFound, c.failed
@@ -438,14 +468,11 @@ func (s *Service) updatePeople(ctx context.Context, rep *Report) error {
 }
 
 // lookupPerson fetches the details and photo of a person and stores them.
-// As in lookup, problems with TMDB end up in the stored state.
-func (s *Service) lookupPerson(ctx context.Context, id int) (store.Person, error) {
+// As in lookup, problems with TMDB end up in the stored state; a refresh
+// that fails keeps what prev holds.
+func (s *Service) lookupPerson(ctx context.Context, id int, prev *store.Person) (store.Person, error) {
 	p := store.Person{TMDbID: id, FetchedAt: s.now()}
 	d, err := s.TMDB.Person(ctx, id, s.Language)
-	if errors.Is(err, tmdb.ErrNotFound) {
-		p.Status = store.MetaNotFound
-		return p, s.Store.SavePerson(ctx, p)
-	}
 	if err == nil {
 		p.Photo, err = s.image(ctx, id, "profile", d.ProfilePath, profileSize)
 	}
@@ -453,26 +480,30 @@ func (s *Service) lookupPerson(ctx context.Context, id int) (store.Person, error
 	if err == nil {
 		data, err = json.Marshal(d)
 	}
-	if err != nil {
-		if ctx.Err() != nil {
-			return p, nil
-		}
+	switch {
+	case err == nil:
+		p.Status, p.Data = store.MetaMatched, string(data)
+	case ctx.Err() != nil:
+		return p, nil
+	case errors.Is(err, tmdb.ErrNotFound) && d.ID == 0:
+		p.Status = store.MetaNotFound
+	default:
 		p.Status, p.Error, p.Photo = store.MetaError, err.Error(), ""
-		return p, s.Store.SavePerson(ctx, p)
 	}
-	p.Status, p.Data = store.MetaMatched, string(data)
+	if p.Status != store.MetaMatched && prev != nil && prev.Status == store.MetaMatched {
+		kept := *prev
+		kept.FetchedAt = p.FetchedAt
+		p.Status, p.Error = store.MetaError, "refresh: "+errorText(err)
+		return p, s.Store.SavePerson(ctx, kept)
+	}
 	return p, s.Store.SavePerson(ctx, p)
 }
 
 // lookupCollection fetches the details and artwork of a film series and
 // stores them, as lookupPerson does for a person.
-func (s *Service) lookupCollection(ctx context.Context, id int) (store.Collection, error) {
+func (s *Service) lookupCollection(ctx context.Context, id int, prev *store.Collection) (store.Collection, error) {
 	c := store.Collection{TMDbID: id, FetchedAt: s.now()}
 	d, err := s.TMDB.Collection(ctx, id, s.Language)
-	if errors.Is(err, tmdb.ErrNotFound) {
-		c.Status = store.MetaNotFound
-		return c, s.Store.SaveCollection(ctx, c)
-	}
 	if err == nil {
 		c.Poster, err = s.image(ctx, id, "collection-poster", d.PosterPath, posterSize)
 	}
@@ -483,28 +514,46 @@ func (s *Service) lookupCollection(ctx context.Context, id int) (store.Collectio
 	if err == nil {
 		data, err = json.Marshal(d)
 	}
-	if err != nil {
-		if ctx.Err() != nil {
-			return c, nil
-		}
+	switch {
+	case err == nil:
+		c.Status, c.Data = store.MetaMatched, string(data)
+	case ctx.Err() != nil:
+		return c, nil
+	case errors.Is(err, tmdb.ErrNotFound) && d.ID == 0:
+		c.Status = store.MetaNotFound
+	default:
 		c.Status, c.Error, c.Poster, c.Backdrop = store.MetaError, err.Error(), "", ""
-		return c, s.Store.SaveCollection(ctx, c)
 	}
-	c.Status, c.Data = store.MetaMatched, string(data)
+	if c.Status != store.MetaMatched && prev != nil && prev.Status == store.MetaMatched {
+		kept := *prev
+		kept.FetchedAt = c.FetchedAt
+		c.Status, c.Error = store.MetaError, "refresh: "+errorText(err)
+		return c, s.Store.SaveCollection(ctx, kept)
+	}
 	return c, s.Store.SaveCollection(ctx, c)
+}
+
+func errorText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 // lookup matches one movie, fetches its details and artwork and stores the
 // result. Problems with TMDB end up in the stored state, not in the error,
-// which is for database failures.
+// which is for database failures. A refresh of a matched movie that fails
+// keeps what was fetched before.
 func (s *Service) lookup(ctx context.Context, it store.Item, prev *store.Metadata) (store.Metadata, error) {
 	md := store.Metadata{ItemID: it.ID, MatchKey: MatchKey(it), FetchedAt: s.now()}
+	refresh := prev != nil && prev.Status == store.MetaMatched && prev.TMDbID > 0 &&
+		(prev.Source == "manual" || prev.MatchKey == md.MatchKey)
 	var id int
 	var err error
 	switch {
 	case prev != nil && prev.Source == "manual" && prev.TMDbID > 0:
 		md.Source, id = "manual", prev.TMDbID
-	case prev != nil && prev.Status == store.MetaMatched && prev.MatchKey == md.MatchKey && prev.TMDbID > 0:
+	case refresh:
 		// The file name is unchanged: refresh the match instead of making
 		// it again, which could pick another movie.
 		md.Source, id = prev.Source, prev.TMDbID
@@ -539,6 +588,16 @@ func (s *Service) lookup(ctx context.Context, it store.Item, prev *store.Metadat
 		default:
 			md.Status = store.MetaMatched
 		}
+	}
+	if refresh && md.Status != store.MetaMatched {
+		kept := *prev
+		kept.FetchedAt = md.FetchedAt
+		md.Status = store.MetaError
+		if md.Error == "" {
+			md.Error = "TMDB lists another movie under its ID now"
+		}
+		md.Error = "refresh: " + md.Error
+		return md, s.Store.SaveMetadata(ctx, kept)
 	}
 	return md, s.Store.SaveMetadata(ctx, md)
 }

@@ -64,7 +64,13 @@ type TMDB struct {
 	Token string
 	// Language of titles and overviews, e.g. "de-DE"; English fills gaps.
 	Language string
+	// RefreshInterval is how old metadata gets before it is fetched again;
+	// 0 keeps it as first fetched.
+	RefreshInterval time.Duration
 }
+
+// DefaultRefreshInterval is the refresh interval without a statement.
+const DefaultRefreshInterval = 90 * 24 * time.Hour
 
 // Library is one movie library made of one or more directories.
 type Library struct {
@@ -101,7 +107,7 @@ func Default() Config {
 var keywords = []string{
 	"articles", "data", "directory", "discovery", "ffmpeg", "ffprobe", "file", "image", "interval",
 	"language", "level", "library", "listen", "log", "name", "no", "on", "path",
-	"port", "probe", "scan", "server", "sort", "tmdb", "token", "workers",
+	"port", "probe", "refresh", "scan", "server", "sort", "tmdb", "token", "workers",
 }
 
 // Load reads the configuration file at path; "-" reads standard input. On
@@ -171,7 +177,7 @@ func (p *parser) tmdb() bool {
 		return false
 	}
 	p.Next()
-	t := &TMDB{}
+	t := &TMDB{RefreshInterval: DefaultRefreshInterval}
 	errsBefore := len(p.Errors())
 	ok := p.Block("tmdb", func() bool {
 		pos := p.Tok().Pos
@@ -206,6 +212,16 @@ func (p *parser) tmdb() bool {
 			}
 			t.Language = v
 			return ok
+		case p.Accept("refresh", "interval"):
+			if !p.once("refresh interval", pos) {
+				return false
+			}
+			d, ok := p.Duration(7*24*time.Hour, 365*24*time.Hour)
+			t.RefreshInterval = d
+			return ok
+		case p.Accept("no", "refresh"):
+			t.RefreshInterval = 0
+			return p.once("refresh interval", pos)
 		}
 		p.Errorf(p.Tok().Pos, "unknown statement %q in tmdb block", p.Tok().Text)
 		return false

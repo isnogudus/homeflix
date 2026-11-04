@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeToken has the shape of a TMDB API Read Access Token (a JWT).
@@ -36,6 +37,15 @@ func TestTMDBBlock(t *testing.T) {
 	if cfg.TMDB.Language != "de-DE" {
 		t.Errorf("language %q, want de-DE from 'language de'", cfg.TMDB.Language)
 	}
+	if cfg.TMDB.RefreshInterval != DefaultRefreshInterval {
+		t.Errorf("refresh interval %v, want the default", cfg.TMDB.RefreshInterval)
+	}
+	for src, want := range map[string]time.Duration{"refresh interval 30d": 30 * 24 * time.Hour, "refresh interval 2w": 14 * 24 * time.Hour, "no refresh": 0} {
+		conf := writeFile(t, dir, "refresh.conf", "tmdb {\n\ttoken file tmdb.token\n\t"+src+"\n}\n", 0o644)
+		if cfg, err := Load(conf); err != nil || cfg.TMDB.RefreshInterval != want {
+			t.Errorf("%s: %+v, %v", src, cfg.TMDB, err)
+		}
+	}
 
 	conf = writeFile(t, dir, "other.conf", "tmdb {\n\ttoken file tmdb.token\n\tlanguage fr-FR\n}\n", 0o644)
 	if cfg, err := Load(conf); err != nil || cfg.TMDB.Language != "fr-FR" {
@@ -65,6 +75,8 @@ func TestTMDBErrors(t *testing.T) {
 		"bad language":       {"tmdb {\n\ttoken file \"v3.token\"\n\tlanguage german\n}", `language "german"`},
 		"unknown statement":  {"tmdb { key abc }", `unknown statement "key" in tmdb block`},
 		"twice":              {"no tmdb\nno tmdb", `"tmdb" given twice`},
+		"refresh too often":  {"tmdb {\n\ttoken file \"v3.token\"\n\trefresh interval 1d\n}", `duration "1d" out of range`},
+		"refresh twice":      {"tmdb {\n\ttoken file \"v3.token\"\n\trefresh interval 30d\n\tno refresh\n}", `"refresh interval" given twice`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := Parse(filepath.Join(dir, "homeflix.conf"), strings.NewReader(tc.src))

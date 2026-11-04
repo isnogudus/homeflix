@@ -48,6 +48,8 @@ func newMetadata(cfg config.Config, db *store.Store, log *slog.Logger) *metadata
 		Workers:  4,
 		LockPath: filepath.Join(cfg.DataDir, "metadata.lock"),
 		Log:      log,
+		// A refresh is due once the data is this old.
+		RefreshAfter: cfg.TMDB.RefreshInterval,
 	}
 }
 
