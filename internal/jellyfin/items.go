@@ -144,13 +144,32 @@ func (s *Server) viewsResult() QueryResult[BaseItemDto] {
 	return out
 }
 
+// wantedKinds reads whether a request asks for movies and for collections
+// (box sets); without IncludeItemTypes it asks for movies only.
+func wantedKinds(r *http.Request) (movies, collections bool) {
+	inc, exc := listParam(r, "IncludeItemTypes"), listParam(r, "ExcludeItemTypes")
+	movies = (len(inc) == 0 || containsFold(inc, "Movie", "Video")) && !containsFold(exc, "Movie")
+	collections = containsFold(inc, "BoxSet") && !containsFold(exc, "BoxSet")
+	return movies, collections
+}
+
+// itemKinds is wantedKinds as a catalog query kind.
+func itemKinds(r *http.Request) catalog.Kinds {
+	switch movies, collections := wantedKinds(r); {
+	case movies && collections:
+		return catalog.MoviesAndCollections
+	case collections:
+		return catalog.CollectionsOnly
+	}
+	return catalog.MoviesOnly
+}
+
+func boolValue(b *bool) bool { return b != nil && *b }
+
 // noResults reports whether the request asks only for things homeflix
 // does not have: other item types, folders, tags, music.
 func noResults(r *http.Request) bool {
-	if types := listParam(r, "IncludeItemTypes"); len(types) > 0 && !containsFold(types, "Movie", "Video") {
-		return true
-	}
-	if containsFold(listParam(r, "ExcludeItemTypes"), "Movie") {
+	if movies, collections := wantedKinds(r); !movies && !collections {
 		return true
 	}
 	if containsFold(listParam(r, "Filters"), "IsFolder", "Dislikes") {
@@ -272,12 +291,17 @@ func (s *Server) getItems(w http.ResponseWriter, r *http.Request, sess *Session)
 			q.IMDbID = v
 		}
 	}
+	q.Kinds = itemKinds(r)
+	q.Collapse = boolValue(boolParam(r, "CollapseBoxSetItems"))
 	if parent != "" {
-		if _, ok := snap.Library(parent); !ok {
+		if c, ok := snap.Collection(parent); ok {
+			q.CollectionID, q.Kinds = c.ID, catalog.MoviesOnly
+		} else if _, ok := snap.Library(parent); ok {
+			q.LibraryID = parent
+		} else {
 			writeJSON(w, http.StatusOK, empty)
 			return
 		}
-		q.LibraryID = parent
 	}
 	if noResults(r) {
 		writeJSON(w, http.StatusOK, empty)
@@ -302,6 +326,9 @@ func (s *Server) anyItemDto(snap *catalog.Snapshot, id string, fields fieldSet, 
 	}
 	if l, ok := snap.Library(id); ok {
 		return s.viewDto(l), true
+	}
+	if c, ok := snap.Collection(id); ok {
+		return s.collectionDto(c, fields, user), true
 	}
 	if f, ok := snap.Genre(id); ok {
 		return s.facetDto(f, "Genre", fields), true
@@ -466,6 +493,14 @@ func (s *Server) itemCounts(w http.ResponseWriter, r *http.Request, sess *Sessio
 func (s *Server) ancestors(w http.ResponseWriter, r *http.Request, sess *Session) {
 	snap := s.Catalog.Snapshot()
 	id := normalizeID(r.PathValue("itemId"))
+	if c, ok := snap.Collection(id); ok {
+		out := []BaseItemDto{}
+		if l, ok := snap.Library(c.Entry().LibraryID); ok {
+			out = append(out, s.viewDto(l))
+		}
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
 	m, ok := snap.Item(id)
 	if !ok {
 		p, isPart := snap.Part(id)
@@ -514,7 +549,13 @@ func (s *Server) themeMedia(w http.ResponseWriter, r *http.Request, sess *Sessio
 }
 
 func (s *Server) extras(w http.ResponseWriter, r *http.Request, sess *Session, trailers bool) {
-	m, ok := s.Catalog.Snapshot().Item(normalizeID(r.PathValue("itemId")))
+	snap := s.Catalog.Snapshot()
+	id := normalizeID(r.PathValue("itemId"))
+	if _, ok := snap.Collection(id); ok {
+		writeJSON(w, http.StatusOK, []BaseItemDto{})
+		return
+	}
+	m, ok := snap.Item(id)
 	if !ok {
 		http.NotFound(w, r)
 		return

@@ -58,16 +58,19 @@ type Service struct {
 	mu sync.Mutex
 }
 
-// Report counts what an update did: movies, then the people they list.
+// Report counts what an update did: movies, then the people they list and
+// the film series they belong to.
 type Report struct {
-	Matched, NotFound, Failed, Unchanged int
-	People, PeopleNotFound, PeopleFailed int
-	Took                                 time.Duration
+	Matched, NotFound, Failed, Unchanged                int
+	People, PeopleNotFound, PeopleFailed                int
+	Collections, CollectionsNotFound, CollectionsFailed int
+	Took                                                time.Duration
 }
 
 // Changed reports whether the update stored anything new.
 func (r Report) Changed() bool {
-	return r.Matched+r.NotFound+r.Failed+r.People+r.PeopleNotFound+r.PeopleFailed > 0
+	return r.Matched+r.NotFound+r.Failed+r.People+r.PeopleNotFound+r.PeopleFailed+
+		r.Collections+r.CollectionsNotFound+r.CollectionsFailed > 0
 }
 
 func (s *Service) now() time.Time {
@@ -96,6 +99,13 @@ func (s *Service) needsUpdate(it store.Item, md store.Metadata, ok bool) bool {
 	case md.Status == store.MetaNotFound:
 		return s.now().Sub(md.FetchedAt) >= retryNotFound
 	case md.Status == store.MetaMatched:
+		// Data of an older version lacks fields; it is fetched again.
+		var v struct {
+			Version int `json:"v"`
+		}
+		if json.Unmarshal([]byte(md.Data), &v) != nil || v.Version < tmdb.DataVersion {
+			return true
+		}
 		// Artwork removed from the cache is fetched again.
 		for _, f := range []string{md.Poster, md.Backdrop} {
 			if f != "" {
@@ -109,7 +119,7 @@ func (s *Service) needsUpdate(it store.Item, md store.Metadata, ok bool) bool {
 }
 
 // Update looks up every movie that has no current metadata, then every
-// person those movies list who has not been looked up yet.
+// person and film series those movies list that has not been looked up yet.
 func (s *Service) Update(ctx context.Context) (Report, error) {
 	if !s.mu.TryLock() {
 		return Report{}, ErrUpdateRunning
@@ -246,21 +256,25 @@ func (s *Service) updateMovies(ctx context.Context, rep *Report) error {
 	return firstErr
 }
 
-// peopleOf returns the TMDB IDs of everyone matched movies list.
-func peopleOf(all map[string]store.Metadata) map[int]bool {
-	ids := map[int]bool{}
+// dataOf decodes the stored movie data of matched metadata.
+func dataOf(all map[string]store.Metadata) []tmdb.Movie {
+	var out []tmdb.Movie
 	for _, md := range all {
 		if md.Status != store.MetaMatched || md.Data == "" {
 			continue
 		}
-		var m struct {
-			People []struct {
-				ID int `json:"id"`
-			} `json:"people"`
+		var m tmdb.Movie
+		if json.Unmarshal([]byte(md.Data), &m) == nil {
+			out = append(out, m)
 		}
-		if json.Unmarshal([]byte(md.Data), &m) != nil {
-			continue
-		}
+	}
+	return out
+}
+
+// peopleOf returns the TMDB IDs of everyone matched movies list.
+func peopleOf(movies []tmdb.Movie) map[int]bool {
+	ids := map[int]bool{}
+	for _, m := range movies {
 		for _, p := range m.People {
 			if p.ID > 0 {
 				ids[p.ID] = true
@@ -270,35 +284,64 @@ func peopleOf(all map[string]store.Metadata) map[int]bool {
 	return ids
 }
 
-// needsPersonUpdate reports whether a person has to be looked up.
-func (s *Service) needsPersonUpdate(p store.Person, ok bool) bool {
+// collectionsOf returns the TMDB IDs of the film series at least two
+// matched movies belong to; a series of one is not shown.
+func collectionsOf(movies []tmdb.Movie) map[int]bool {
+	n := map[int]int{}
+	for _, m := range movies {
+		if m.Collection != nil {
+			n[m.Collection.ID]++
+		}
+	}
+	ids := map[int]bool{}
+	for id, c := range n {
+		if c >= 2 {
+			ids[id] = true
+		}
+	}
+	return ids
+}
+
+// lookupState is what updateSet needs to know of a stored person or
+// collection.
+type lookupState struct {
+	status  string
+	fetched time.Time
+	files   []string
+}
+
+// needsLookup reports whether a person or collection has to be looked up.
+func (s *Service) needsLookup(st lookupState, ok bool) bool {
 	switch {
 	case !ok:
 		return true
-	case p.Status == store.MetaError:
-		return s.now().Sub(p.FetchedAt) >= retryErrors
-	case p.Status == store.MetaNotFound:
-		return s.now().Sub(p.FetchedAt) >= retryNotFound
-	case p.Photo != "":
-		// A photo removed from the cache is fetched again.
-		_, err := os.Stat(filepath.Join(s.Dir, p.Photo))
-		return err != nil
+	case st.status == store.MetaError:
+		return s.now().Sub(st.fetched) >= retryErrors
+	case st.status == store.MetaNotFound:
+		return s.now().Sub(st.fetched) >= retryNotFound
+	}
+	// Artwork removed from the cache is fetched again.
+	for _, f := range st.files {
+		if f == "" {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(s.Dir, f)); err != nil {
+			return true
+		}
 	}
 	return false
 }
 
-// updatePeople looks up the people of matched movies and forgets those no
-// movie lists any more.
-func (s *Service) updatePeople(ctx context.Context, rep *Report) error {
-	all, err := s.Store.AllMetadata(ctx)
-	if err != nil {
-		return err
-	}
-	wanted := peopleOf(all)
-	have, err := s.Store.AllPeople(ctx)
-	if err != nil {
-		return err
-	}
+// setCounts counts the lookups of one kind.
+type setCounts struct{ fetched, notFound, failed int }
+
+// updateSet looks up the wanted people or collections that need it and
+// deletes the stored ones no longer wanted. lookup stores one and returns
+// its state and error message.
+func (s *Service) updateSet(ctx context.Context, what string, wanted map[int]bool, have map[int]lookupState,
+	del func(context.Context, []int) error,
+	lookup func(context.Context, int) (status, msg string, err error)) (setCounts, error) {
+	var c setCounts
 	var gone, todo []int
 	for id := range have {
 		if !wanted[id] {
@@ -306,25 +349,25 @@ func (s *Service) updatePeople(ctx context.Context, rep *Report) error {
 		}
 	}
 	for id := range wanted {
-		if p, ok := have[id]; s.needsPersonUpdate(p, ok) {
+		if st, ok := have[id]; s.needsLookup(st, ok) {
 			todo = append(todo, id)
 		}
 	}
-	if err := s.Store.DeletePeople(ctx, gone); err != nil {
-		return err
+	if err := del(ctx, gone); err != nil {
+		return c, err
 	}
 	if len(todo) == 0 {
-		return nil
+		return c, nil
 	}
 	sort.Ints(todo)
 	if s.Log != nil {
-		s.Log.Info("fetching people", "count", len(todo))
+		s.Log.Info("fetching "+what, "count", len(todo))
 	}
 	var mu sync.Mutex
 	var firstErr error
-	prog := progress{s: s, what: "people", total: len(todo), last: s.now()}
+	prog := progress{s: s, what: what, total: len(todo), last: s.now()}
 	s.parallel(ctx, len(todo), func(i int) {
-		p, err := s.lookupPerson(ctx, todo[i])
+		status, msg, err := lookup(ctx, todo[i])
 		if ctx.Err() != nil {
 			return
 		}
@@ -335,19 +378,63 @@ func (s *Service) updatePeople(ctx context.Context, rep *Report) error {
 			if firstErr == nil {
 				firstErr = err
 			}
-		case p.Status == store.MetaMatched:
-			rep.People++
-		case p.Status == store.MetaNotFound:
-			rep.PeopleNotFound++
+		case status == store.MetaMatched:
+			c.fetched++
+		case status == store.MetaNotFound:
+			c.notFound++
 		default:
-			rep.PeopleFailed++
+			c.failed++
 			if s.Log != nil {
-				s.Log.Warn("person lookup failed", "tmdb_id", p.TMDbID, "err", p.Error)
+				s.Log.Warn(what+" lookup failed", "tmdb_id", todo[i], "err", msg)
 			}
 		}
-		prog.step(rep.People + rep.PeopleNotFound + rep.PeopleFailed)
+		prog.step(c.fetched + c.notFound + c.failed)
 	})
-	return firstErr
+	return c, firstErr
+}
+
+// updatePeople looks up the people and film series of matched movies and
+// forgets those no movie lists any more.
+func (s *Service) updatePeople(ctx context.Context, rep *Report) error {
+	all, err := s.Store.AllMetadata(ctx)
+	if err != nil {
+		return err
+	}
+	movies := dataOf(all)
+
+	people, err := s.Store.AllPeople(ctx)
+	if err != nil {
+		return err
+	}
+	have := map[int]lookupState{}
+	for id, p := range people {
+		have[id] = lookupState{p.Status, p.FetchedAt, []string{p.Photo}}
+	}
+	c, err := s.updateSet(ctx, "people", peopleOf(movies), have, s.Store.DeletePeople,
+		func(ctx context.Context, id int) (string, string, error) {
+			p, err := s.lookupPerson(ctx, id)
+			return p.Status, p.Error, err
+		})
+	rep.People, rep.PeopleNotFound, rep.PeopleFailed = c.fetched, c.notFound, c.failed
+	if err != nil || ctx.Err() != nil {
+		return err
+	}
+
+	cols, err := s.Store.AllCollections(ctx)
+	if err != nil {
+		return err
+	}
+	have = map[int]lookupState{}
+	for id, col := range cols {
+		have[id] = lookupState{col.Status, col.FetchedAt, []string{col.Poster, col.Backdrop}}
+	}
+	c, err = s.updateSet(ctx, "collections", collectionsOf(movies), have, s.Store.DeleteCollections,
+		func(ctx context.Context, id int) (string, string, error) {
+			col, err := s.lookupCollection(ctx, id)
+			return col.Status, col.Error, err
+		})
+	rep.Collections, rep.CollectionsNotFound, rep.CollectionsFailed = c.fetched, c.notFound, c.failed
+	return err
 }
 
 // lookupPerson fetches the details and photo of a person and stores them.
@@ -377,6 +464,36 @@ func (s *Service) lookupPerson(ctx context.Context, id int) (store.Person, error
 	return p, s.Store.SavePerson(ctx, p)
 }
 
+// lookupCollection fetches the details and artwork of a film series and
+// stores them, as lookupPerson does for a person.
+func (s *Service) lookupCollection(ctx context.Context, id int) (store.Collection, error) {
+	c := store.Collection{TMDbID: id, FetchedAt: s.now()}
+	d, err := s.TMDB.Collection(ctx, id, s.Language)
+	if errors.Is(err, tmdb.ErrNotFound) {
+		c.Status = store.MetaNotFound
+		return c, s.Store.SaveCollection(ctx, c)
+	}
+	if err == nil {
+		c.Poster, err = s.image(ctx, id, "collection-poster", d.PosterPath, posterSize)
+	}
+	if err == nil {
+		c.Backdrop, err = s.image(ctx, id, "collection-backdrop", d.BackdropPath, backdropSize)
+	}
+	var data []byte
+	if err == nil {
+		data, err = json.Marshal(d)
+	}
+	if err != nil {
+		if ctx.Err() != nil {
+			return c, nil
+		}
+		c.Status, c.Error, c.Poster, c.Backdrop = store.MetaError, err.Error(), "", ""
+		return c, s.Store.SaveCollection(ctx, c)
+	}
+	c.Status, c.Data = store.MetaMatched, string(data)
+	return c, s.Store.SaveCollection(ctx, c)
+}
+
 // lookup matches one movie, fetches its details and artwork and stores the
 // result. Problems with TMDB end up in the stored state, not in the error,
 // which is for database failures.
@@ -384,9 +501,14 @@ func (s *Service) lookup(ctx context.Context, it store.Item, prev *store.Metadat
 	md := store.Metadata{ItemID: it.ID, MatchKey: MatchKey(it), FetchedAt: s.now()}
 	var id int
 	var err error
-	if prev != nil && prev.Source == "manual" && prev.TMDbID > 0 {
+	switch {
+	case prev != nil && prev.Source == "manual" && prev.TMDbID > 0:
 		md.Source, id = "manual", prev.TMDbID
-	} else {
+	case prev != nil && prev.Status == store.MetaMatched && prev.MatchKey == md.MatchKey && prev.TMDbID > 0:
+		// The file name is unchanged: refresh the match instead of making
+		// it again, which could pick another movie.
+		md.Source, id = prev.Source, prev.TMDbID
+	default:
 		md.Source, id, err = s.match(ctx, it)
 	}
 	switch {
@@ -611,8 +733,8 @@ func (s *Service) Match(ctx context.Context, it store.Item, tmdbID int) (store.M
 const minAge = time.Hour
 
 // RemoveUnusedArtwork deletes files in dir that no metadata refers to:
-// artwork of movies deleted for good, portraits of people no movie lists
-// any more, artwork replaced by a newer one at TMDB, and downloads left
+// artwork of movies deleted for good, portraits of people and artwork of
+// film series no movie lists any more, artwork replaced by a newer one at TMDB, and downloads left
 // over from interrupted updates. Files younger than minAge are kept. It
 // does not need TMDB access, so it also runs while TMDB is switched off.
 func RemoveUnusedArtwork(ctx context.Context, st *store.Store, dir string, log *slog.Logger) (int, error) {
@@ -631,12 +753,19 @@ func RemoveUnusedArtwork(ctx context.Context, st *store.Store, dir string, log *
 	if err != nil {
 		return 0, err
 	}
+	cols, err := st.AllCollections(ctx)
+	if err != nil {
+		return 0, err
+	}
 	used := map[string]bool{}
 	for _, md := range all {
 		used[md.Poster], used[md.Backdrop] = true, true
 	}
 	for _, p := range people {
 		used[p.Photo] = true
+	}
+	for _, c := range cols {
+		used[c.Poster], used[c.Backdrop] = true, true
 	}
 	removed := 0
 	for _, de := range des {

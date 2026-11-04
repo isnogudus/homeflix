@@ -33,6 +33,10 @@ func (s *Server) itemImage(w http.ResponseWriter, r *http.Request) {
 		s.personImage(w, r, f, kind)
 		return
 	}
+	if c, ok := snap.Collection(id); ok {
+		s.collectionImage(w, r, c, kind)
+		return
+	}
 	m, ok := snap.Item(id)
 	if !ok {
 		// Later parts of a movie show the movie's artwork.
@@ -84,6 +88,24 @@ func (s *Server) personImage(w http.ResponseWriter, r *http.Request, f *catalog.
 	path, err := s.Images.Photo(f, imageSize(r))
 	if err != nil {
 		s.Log.Warn("image unavailable", "person", f.Name, "err", err)
+		http.NotFound(w, r)
+		return
+	}
+	s.serveImage(w, r, path, tag)
+}
+
+// collectionImage serves the poster or backdrop of a collection.
+func (s *Server) collectionImage(w http.ResponseWriter, r *http.Request, c *catalog.Collection, kind images.Kind) {
+	tag := images.CollectionTag(c, kind)
+	if tag == "" || (kind != images.Primary && kind != images.Backdrop && kind != images.Thumb) {
+		http.NotFound(w, r)
+		return
+	}
+	path, err := s.Images.CollectionImage(r.Context(), c, kind, imageSize(r))
+	if err != nil {
+		if !errors.Is(err, images.ErrNoImage) && r.Context().Err() == nil {
+			s.Log.Warn("image unavailable", "collection", c.Name, "type", kind, "err", err)
+		}
 		http.NotFound(w, r)
 		return
 	}

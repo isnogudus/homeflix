@@ -114,8 +114,10 @@ func matchCommand(args []string, cio cliIO) error {
 		rep, err := svc.Update(ctx)
 		fmt.Fprintf(cio.stdout, "movies: matched %d, not found %d, failed %d, unchanged %d\n",
 			rep.Matched, rep.NotFound, rep.Failed, rep.Unchanged)
-		fmt.Fprintf(cio.stdout, "people: fetched %d, not found %d, failed %d; took %s\n",
-			rep.People, rep.PeopleNotFound, rep.PeopleFailed, rep.Took.Round(time.Second))
+		fmt.Fprintf(cio.stdout, "people: fetched %d, not found %d, failed %d\n",
+			rep.People, rep.PeopleNotFound, rep.PeopleFailed)
+		fmt.Fprintf(cio.stdout, "collections: fetched %d, not found %d, failed %d; took %s\n",
+			rep.Collections, rep.CollectionsNotFound, rep.CollectionsFailed, rep.Took.Round(time.Second))
 		if err != nil {
 			return err
 		}

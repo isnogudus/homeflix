@@ -50,13 +50,17 @@ Users are created, changed and deleted with `homeflix user` only.
 
 | Endpoint | Auth | Notes |
 |---|---|---|
-| `GET /Items`, `GET /Users/{userId}/Items` | yes | `ParentId`, `IncludeItemTypes`, `ExcludeItemTypes`, `Recursive`, `Ids`, `SortBy` (name, year, premiere date, rating, age rating, date added, runtime, date played, play count, favourite, played, random), `SortOrder`, `StartIndex`, `Limit`, `Fields`, `Filters` (IsPlayed, IsUnplayed, IsFavorite, IsResumable), `IsPlayed`, `IsFavorite`, `SearchTerm`, `NameStartsWith`, `NameStartsWithOrGreater`, `NameLessThan`, `Genres`, `GenreIds`, `PersonIds`, `Studios`, `StudioIds`, `Years`, `HasSubtitles`, `IsHd`, `AudioLanguages`, `SubtitleLanguages`, `HasTrailer`, `HasSpecialFeature`, `AnyProviderIdEquals` |
+| `GET /Items`, `GET /Users/{userId}/Items` | yes | `ParentId`, `IncludeItemTypes`, `ExcludeItemTypes`, `Recursive`, `Ids`, `SortBy` (name, year, premiere date, rating, age rating, date added, runtime, date played, play count, favourite, played, random), `SortOrder`, `StartIndex`, `Limit`, `Fields`, `Filters` (IsPlayed, IsUnplayed, IsFavorite, IsResumable), `IsPlayed`, `IsFavorite`, `SearchTerm`, `NameStartsWith`, `NameStartsWithOrGreater`, `NameLessThan`, `Genres`, `GenreIds`, `PersonIds`, `Studios`, `StudioIds`, `Years`, `HasSubtitles`, `IsHd`, `AudioLanguages`, `SubtitleLanguages`, `HasTrailer`, `HasSpecialFeature`, `AnyProviderIdEquals`, `CollapseBoxSetItems` |
 | `GET /Items/{itemId}`, `GET /Users/{userId}/Items/{itemId}` | yes | movies, versions, parts and extras with media sources, streams and chapters; `People` carry `PrimaryImageTag` for their portraits |
 | `GET /Items/Latest`, `GET /Users/{userId}/Items/Latest` | yes | by date added |
 | `GET /UserItems/Resume`, `GET /Users/{userId}/Items/Resume` | yes | started, not finished |
 | `GET /Items/Filters`, `GET /Items/Filters2` | yes | genres and years of a view |
 | `GET /Items/Counts` | yes | movie count |
 | `GET /Items/{itemId}/Ancestors` | yes | parent movie of an extra, and the library |
+| `GET /Items?IncludeItemTypes=BoxSet` | yes | collections: film series that two or more movies belong to, from TMDB; filters match their movies |
+| `GET /Items?IncludeItemTypes=Movie,BoxSet&CollapseBoxSetItems=true` | yes | movies with collections in place of their movies, unless movie filters (genre, year, play state, …) are set, as in Jellyfin |
+| `GET /Items?ParentId={collectionId}` | yes | the movies of a collection, by premiere date unless `SortBy` says otherwise |
+| `GET /Items/{collectionId}` | yes | a collection as `BoxSet` with overview, child count and `UserData.UnplayedItemCount` |
 | `GET /Items/{itemId}/Similar` | yes | most shared genres, then closest year |
 | `GET /Items/{itemId}/SpecialFeatures`, `GET /Users/{userId}/Items/{itemId}/SpecialFeatures` | yes | extras from the movie's folder |
 | `GET /Items/{itemId}/LocalTrailers`, `GET /Users/{userId}/Items/{itemId}/LocalTrailers` | yes | trailers from the movie's folder |
@@ -72,7 +76,7 @@ Users are created, changed and deleted with `homeflix user` only.
 
 | Endpoint | Auth | Notes |
 |---|---|---|
-| `GET /Items/{itemId}/Images/{type}[/{index}]` | no | Primary, Backdrop and Thumb, index 0 only; for people the portrait as Primary; `maxWidth`, `maxHeight`, `width`, `height`, `fillWidth`, `fillHeight`, `quality`; immutable caching when `tag` matches |
+| `GET /Items/{itemId}/Images/{type}[/{index}]` | no | Primary, Backdrop and Thumb, index 0 only; for people the portrait as Primary; for collections their TMDB poster and backdrop, else those of their first movie; `maxWidth`, `maxHeight`, `width`, `height`, `fillWidth`, `fillHeight`, `quality`; immutable caching when `tag` matches |
 
 Images need no token, as in Jellyfin: clients load them through image
 caches that send no credentials.
@@ -103,8 +107,8 @@ homeflix only serves the original file, which starts at zero.
 | `POST /Sessions/Capabilities`, `POST /Sessions/Capabilities/Full` | yes | accepted, not stored |
 | `GET /Sessions` | yes | the caller's own session |
 | `POST /Sessions/Playing`, `…/Progress`, `…/Stopped`, `…/Ping` | yes | resume position and played state, with Jellyfin's thresholds (5 %, 90 %, 5 minutes) |
-| `POST\|DELETE /UserPlayedItems/{itemId}`, `/Users/{userId}/PlayedItems/{itemId}` | yes | |
-| `POST\|DELETE /UserFavoriteItems/{itemId}`, `/Users/{userId}/FavoriteItems/{itemId}` | yes | |
+| `POST\|DELETE /UserPlayedItems/{itemId}`, `/Users/{userId}/PlayedItems/{itemId}` | yes | for a collection: all its movies |
+| `POST\|DELETE /UserFavoriteItems/{itemId}`, `/Users/{userId}/FavoriteItems/{itemId}` | yes | also for collections |
 | `GET\|POST /UserItems/{itemId}/UserData`, `/Users/{userId}/Items/{itemId}/UserData` | yes | |
 | `POST\|DELETE /UserItems/{itemId}/Rating`, `/Users/{userId}/Items/{itemId}/Rating` | yes | likes are not kept; returns the current user data |
 | `GET /socket`, `GET /embywebsocket` | yes | WebSocket; see below |
@@ -127,7 +131,9 @@ homeflix.conf(5) turns it off.
 
 - Transcoding and remuxing: HLS playlists (`/Videos/{id}/master.m3u8`),
   `/Videos/{id}/hls1/…`, audio and subtitle burn-in.
-- Series, music, books, photos, live TV and collections.
+- Series, music, books, photos and live TV.
+- Collections made or edited by hand (`/Collections`); collections come
+  from TMDB only.
 - Administration through the API: users, libraries, scheduled tasks,
   plugins, server configuration and the startup wizard.
 - Remote control, SyncPlay and session messages over the WebSocket.

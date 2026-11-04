@@ -171,7 +171,7 @@ func TestWarmRemovesUnusedImages(t *testing.T) {
 		os.WriteFile(filepath.Join(dir, p), []byte("old"), 0o644)
 	}
 	m := testMovie(true).Parent
-	s.Warm(context.Background(), []*catalog.Movie{m}, nil)
+	s.warm(context.Background(), []*catalog.Movie{m}, nil)
 	if runs() != 2 {
 		t.Errorf("ffmpeg ran %d times, want 2 (movie and extra)", runs())
 	}
@@ -183,7 +183,7 @@ func TestWarmRemovesUnusedImages(t *testing.T) {
 	if _, err := os.Stat(s.stillPath(stillTag(m))); err != nil {
 		t.Error("current still missing")
 	}
-	s.Warm(context.Background(), []*catalog.Movie{m}, nil)
+	s.warm(context.Background(), []*catalog.Movie{m}, nil)
 	if runs() != 2 {
 		t.Error("second warm-up extracted again")
 	}
@@ -259,15 +259,50 @@ func TestPhotoSurvivesWarm(t *testing.T) {
 	if img, _ := decodeFile(p); img.Bounds().Dx() != 210 || img.Bounds().Dy() != 316 {
 		t.Errorf("photo %v, want 210x316", img.Bounds())
 	}
-	s.Warm(context.Background(), nil, []*catalog.Facet{person})
+	s.warm(context.Background(), nil, keepTags([]*catalog.Facet{person}, nil))
 	if _, err := os.Stat(p); err != nil {
 		t.Errorf("scaled photo of a listed person removed: %v", err)
 	}
-	s.Warm(context.Background(), nil, nil)
+	s.warm(context.Background(), nil, nil)
 	if _, err := os.Stat(p); !os.IsNotExist(err) {
 		t.Errorf("scaled photo of a forgotten person kept: %v", err)
 	}
 	if _, err := s.Photo(&catalog.Facet{Name: "No Photo"}, Size{}); !errors.Is(err, ErrNoImage) {
 		t.Errorf("person without photo: %v", err)
+	}
+}
+
+func TestCollectionImages(t *testing.T) {
+	dir := t.TempDir()
+	poster := filepath.Join(dir, "10-collection-poster-p.jpg")
+	if err := writeJPEG(poster, image.NewRGBA(image.Rect(0, 0, 400, 600)), 90); err != nil {
+		t.Fatal(err)
+	}
+	bin, runs := fakeFFmpeg(t, frame(0, 128))
+	first := testMovie(false)
+	c := &catalog.Collection{Name: "Reihe", PosterFile: poster, Movies: []*catalog.Movie{first}}
+	s := &Service{FFmpeg: bin, Dir: filepath.Join(dir, "cache"), Workers: 1}
+
+	// The poster is the collection's own, the backdrop that of its first movie.
+	if CollectionTag(c, Primary) == Tag(first, Primary) || CollectionTag(c, Backdrop) != Tag(first, Backdrop) ||
+		CollectionTag(c, Thumb) != CollectionTag(c, Backdrop) {
+		t.Errorf("tags: %q %q", CollectionTag(c, Primary), CollectionTag(c, Backdrop))
+	}
+	p, err := s.CollectionImage(context.Background(), c, Primary, Size{MaxHeight: 300})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if img, _ := decodeFile(p); img.Bounds().Dx() != 200 || img.Bounds().Dy() != 300 {
+		t.Errorf("poster %v, want 200x300", img.Bounds())
+	}
+	if runs() != 0 {
+		t.Error("own poster made from a still")
+	}
+	if _, err := s.CollectionImage(context.Background(), c, Backdrop, Size{MaxWidth: 640}); err != nil || runs() != 1 {
+		t.Errorf("backdrop of the first movie: %v, %d ffmpeg runs", err, runs())
+	}
+	s.warm(context.Background(), []*catalog.Movie{first}, keepTags(nil, []*catalog.Collection{c}))
+	if _, err := os.Stat(p); err != nil {
+		t.Errorf("scaled poster of a collection removed: %v", err)
 	}
 }

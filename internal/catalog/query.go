@@ -9,11 +9,29 @@ import (
 	"homeflix/internal/store"
 )
 
-// Query selects, orders and pages movies.
+// Kinds says what a query lists.
+type Kinds int
+
+const (
+	MoviesOnly Kinds = iota
+	CollectionsOnly
+	MoviesAndCollections
+)
+
+// Query selects, orders and pages movies and collections.
 type Query struct {
 	LibraryID string   // "" for all libraries
 	IDs       []string // restrict to these movies
 	Search    string
+
+	// Kinds selects movies, collections or both. Collapse, with both,
+	// lists a collection in place of its movies unless movie filters are
+	// set, as Jellyfin's CollapseBoxSetItems does.
+	Kinds    Kinds
+	Collapse bool
+	// CollectionID restricts the movies to one collection, listed by
+	// premiere date unless SortBy says otherwise.
+	CollectionID string
 
 	NameStartsWith          string
 	NameStartsWithOrGreater string
@@ -43,7 +61,17 @@ type Query struct {
 	Limit      int // 0 for no limit
 }
 
-// Movies returns the requested page and the number of matching movies.
+// hasMovieFilters reports whether the query filters movies by more than
+// library and name; collections are then not collapsed.
+func (q Query) hasMovieFilters() bool {
+	return len(q.IDs) > 0 || len(q.Years) > 0 || q.IMDbID != "" || q.HasSubtitles != nil || q.IsHD != nil ||
+		q.Is4K != nil || q.HasSpecialFeature != nil || q.HasTrailer != nil || len(q.GenreIDs) > 0 ||
+		len(q.PersonIDs) > 0 || len(q.StudioIDs) > 0 || q.Played != nil || q.Favorite != nil ||
+		q.Resumable != nil || len(q.AudioLanguages) > 0 || len(q.SubtitleLanguages) > 0
+}
+
+// Movies returns the requested page of movies (and collection entries,
+// see Collection.Entry) and the number of matching entries.
 func (s *Snapshot) Movies(q Query) ([]*Movie, int) {
 	ids := map[string]bool{}
 	for _, id := range q.IDs {
@@ -58,15 +86,16 @@ func (s *Snapshot) Movies(q Query) ([]*Movie, int) {
 	orGreater := SearchKey(q.NameStartsWithOrGreater)
 	lessThan := SearchKey(q.NameLessThan)
 
-	var out []*Movie
-	for _, m := range s.movies {
+	nameOK := func(m *Movie) bool {
+		return (search == "" || strings.Contains(m.searchKey, search)) &&
+			(starts == "" || strings.HasPrefix(m.SortTitle, starts)) &&
+			(orGreater == "" || m.SortTitle >= orGreater) &&
+			(lessThan == "" || m.SortTitle < lessThan)
+	}
+	movieOK := func(m *Movie) bool {
 		switch {
 		case q.LibraryID != "" && m.LibraryID != q.LibraryID,
 			len(ids) > 0 && !ids[m.ID],
-			search != "" && !strings.Contains(m.searchKey, search),
-			starts != "" && !strings.HasPrefix(m.SortTitle, starts),
-			orGreater != "" && m.SortTitle < orGreater,
-			lessThan != "" && m.SortTitle >= lessThan,
 			len(years) > 0 && !years[m.Year],
 			q.IMDbID != "" && !strings.EqualFold(m.IMDbID, q.IMDbID),
 			q.HasSubtitles != nil && m.hasSubtitles != *q.HasSubtitles,
@@ -82,11 +111,77 @@ func (s *Snapshot) Movies(q Query) ([]*Movie, int) {
 			q.Resumable != nil && (q.User[m.ID].Position > 0) != *q.Resumable,
 			len(q.AudioLanguages) > 0 && !anyIn(q.AudioLanguages, m.audioLangs),
 			len(q.SubtitleLanguages) > 0 && !anyIn(q.SubtitleLanguages, m.subtitleLangs):
-			continue
+			return false
 		}
-		out = append(out, m)
+		return true
 	}
-	sortMovies(out, q.SortBy, q.Descending, q.User)
+	// collectionOK applies the query to a collection: its library, name and
+	// ID, and the movie filters to its movies, so that, say, the collections
+	// of an actor can be listed.
+	collectionOK := func(c *Collection) bool {
+		if q.LibraryID != "" && !c.InLibrary(q.LibraryID) || !nameOK(c.entry) {
+			return false
+		}
+		if len(ids) > 0 {
+			return ids[c.ID]
+		}
+		if !q.hasMovieFilters() {
+			return true
+		}
+		for _, m := range c.Movies {
+			if movieOK(m) {
+				return true
+			}
+		}
+		return false
+	}
+
+	source := s.movies
+	var col *Collection
+	if q.CollectionID != "" {
+		var ok bool
+		if col, ok = s.collections[q.CollectionID]; !ok {
+			return nil, 0
+		}
+		source = col.Movies
+	}
+	var out []*Movie
+	if q.Kinds == CollectionsOnly {
+		for _, c := range s.collectionList {
+			if collectionOK(c) {
+				out = append(out, c.entry)
+			}
+		}
+	} else {
+		collapse := q.Kinds == MoviesAndCollections && q.Collapse && col == nil && !q.hasMovieFilters()
+		seen := map[*Collection]bool{}
+		for _, m := range source {
+			if !movieOK(m) {
+				continue
+			}
+			if c := m.Collection; collapse && c != nil {
+				if !seen[c] && nameOK(c.entry) {
+					out = append(out, c.entry)
+				}
+				seen[c] = true
+				continue
+			}
+			if nameOK(m) {
+				out = append(out, m)
+			}
+		}
+		// Listed besides their movies, collections take no movie filters.
+		if q.Kinds == MoviesAndCollections && !collapse && col == nil && !q.hasMovieFilters() {
+			for _, c := range s.collectionList {
+				if collectionOK(c) {
+					out = append(out, c.entry)
+				}
+			}
+		}
+	}
+	if col == nil || len(q.SortBy) > 0 {
+		sortMovies(out, q.SortBy, q.Descending, q.User)
+	}
 	total := len(out)
 	start := min(max(q.StartIndex, 0), total)
 	out = out[start:]

@@ -355,6 +355,39 @@ func (s *Service) Photo(f *catalog.Facet, size Size) (string, error) {
 	return s.scaled(f.Person.PhotoFile, tag, false, size)
 }
 
+// collectionArt returns the TMDB image file of a kind of a collection.
+func collectionArt(c *catalog.Collection, kind Kind) string {
+	if kind == Primary {
+		return c.PosterFile
+	}
+	return c.BackdropFile
+}
+
+// CollectionTag identifies the image of a kind of a collection: its own
+// artwork if TMDB has some, else that of its first movie.
+func CollectionTag(c *catalog.Collection, kind Kind) string {
+	if kind == Thumb {
+		kind = Backdrop
+	}
+	if a := collectionArt(c, kind); a != "" {
+		sum := sha256.Sum256([]byte("tmdb|" + filepath.Base(a) + "|Collection" + string(kind)))
+		return hex.EncodeToString(sum[:8])
+	}
+	return Tag(c.Movies[0], kind)
+}
+
+// CollectionImage returns a JPEG file of the image of a kind of a
+// collection, scaled as needed.
+func (s *Service) CollectionImage(ctx context.Context, c *catalog.Collection, kind Kind, size Size) (string, error) {
+	if kind == Thumb {
+		kind = Backdrop
+	}
+	if a := collectionArt(c, kind); a != "" {
+		return s.scaled(a, CollectionTag(c, kind), false, size)
+	}
+	return s.Get(ctx, c.Movies[0], kind, size)
+}
+
 // scaled returns src scaled to size, cut to the poster shape if poster is
 // set, from the cache of tag if it was made before.
 func (s *Service) scaled(src, tag string, poster bool, size Size) (string, error) {
@@ -448,15 +481,37 @@ func scale(img image.Image, s Size) image.Image {
 }
 
 // Warm makes the stills of all movies and extras that have none yet, so
-// browsing does not wait for ffmpeg, and removes cached images no movie or
-// person uses any more. It stops when ctx is done.
-func (s *Service) Warm(ctx context.Context, movies []*catalog.Movie, people []*catalog.Facet) {
-	s.init()
-	wanted := map[string]bool{}
+// browsing does not wait for ffmpeg, and removes cached images no movie,
+// person or collection uses any more. It stops when ctx is done.
+func (s *Service) Warm(ctx context.Context, snap *catalog.Snapshot) {
+	s.warm(ctx, snap.AllMovies(), keepTags(snap.Facets("person", "", ""), snap.Collections()))
+}
+
+// keepTags lists the tags of the portraits of people and of the own
+// artwork of collections.
+func keepTags(people []*catalog.Facet, cols []*catalog.Collection) []string {
+	var tags []string
 	for _, f := range people {
 		if t := PhotoTag(f); t != "" {
-			wanted[t] = true
+			tags = append(tags, t)
 		}
+	}
+	for _, c := range cols {
+		for _, k := range []Kind{Primary, Backdrop} {
+			if collectionArt(c, k) != "" {
+				tags = append(tags, CollectionTag(c, k))
+			}
+		}
+	}
+	return tags
+}
+
+// warm is Warm for a list of movies; scaled images of the keep tags stay.
+func (s *Service) warm(ctx context.Context, movies []*catalog.Movie, keep []string) {
+	s.init()
+	wanted := map[string]bool{}
+	for _, t := range keep {
+		wanted[t] = true
 	}
 	var todo []*catalog.Movie
 	consider := func(m *catalog.Movie) {

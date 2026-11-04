@@ -25,6 +25,7 @@ type fakeMovie struct {
 	overviewDE, overviewEN string
 	imdb                   string
 	cast                   []int // TMDB person IDs
+	collection             int   // TMDB collection ID, 0 for none
 }
 
 type fakePerson struct {
@@ -88,12 +89,22 @@ func (f *fakeTMDB) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"id": m.id, "title": m.title, "original_title": m.original, "overview": overview,
 				"release_date": m.date, "imdb_id": m.imdb, "vote_average": 7.0, "vote_count": 10,
 				"poster_path": fmt.Sprintf("/p%d.jpg", m.id), "backdrop_path": fmt.Sprintf("/b%d.jpg", m.id),
-				"genres":  []map[string]any{{"id": 18, "name": "Drama"}},
-				"credits": map[string]any{"cast": cast},
+				"genres":                []map[string]any{{"id": 18, "name": "Drama"}},
+				"credits":               map[string]any{"cast": cast},
+				"belongs_to_collection": collectionRef(m.collection),
 			})
 			return
 		}
 		http.NotFound(w, r)
+	case strings.HasPrefix(r.URL.Path, "/3/collection/"):
+		var id int
+		fmt.Sscanf(strings.TrimPrefix(r.URL.Path, "/3/collection/"), "%d", &id)
+		if id != 1234 {
+			http.NotFound(w, r)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"id": id, "name": "Panem Filmreihe", "overview": "Die Reihe.",
+			"poster_path": "/cp.jpg", "backdrop_path": "/cb.jpg"})
 	case strings.HasPrefix(r.URL.Path, "/3/person/"):
 		var id int
 		fmt.Sscanf(strings.TrimPrefix(r.URL.Path, "/3/person/"), "%d", &id)
@@ -113,6 +124,13 @@ func (f *fakeTMDB) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+func collectionRef(id int) any {
+	if id == 0 {
+		return nil
+	}
+	return map[string]any{"id": id, "name": fmt.Sprint("Reihe ", id)}
 }
 
 func (f *fakeTMDB) take() []string {
@@ -143,9 +161,12 @@ func newFixture(t *testing.T) *fixture {
 	fake := &fakeTMDB{movies: []fakeMovie{
 		{id: 329865, title: "Arrival", original: "Arrival", date: "2016-09-02", overviewDE: "Außerirdische landen.", imdb: "tt2543164",
 			cast: []int{9273, 555, 777}},
-		{id: 70160, title: "Die Tribute von Panem - The Hunger Games", original: "The Hunger Games", date: "2012-03-12", overviewEN: "Every year ..."},
+		{id: 70160, title: "Die Tribute von Panem - The Hunger Games", original: "The Hunger Games", date: "2012-03-12", overviewEN: "Every year ...",
+			collection: 1234},
+		{id: 101299, title: "Die Tribute von Panem - Catching Fire", original: "Catching Fire", date: "2013-11-21",
+			overviewDE: "Die Spiele gehen weiter.", imdb: "tt1951264", collection: 1234},
 		{id: 687163, title: "Der Astronaut – Project Hail Mary", original: "Project Hail Mary", date: "2026-03-20", overviewDE: "Ein Lehrer im All."},
-		{id: 11, title: "Heat", original: "Heat", date: "1996-02-15", overviewDE: "Cops and robbers."},
+		{id: 11, title: "Heat", original: "Heat", date: "1996-02-15", overviewDE: "Cops and robbers.", collection: 77},
 		{id: 99, title: "Delete Deleite", original: "Delete Deleite", date: "2013-05-01"},
 		{id: 12, title: "Rush", original: "Rush", date: "2013-09-02", imdb: "tt1979320"},
 	}}
@@ -434,5 +455,59 @@ func TestPeople(t *testing.T) {
 	RemoveUnusedArtwork(ctx, f.store, f.svc.Dir, nil)
 	if _, err := os.Stat(filepath.Join(f.svc.Dir, amy.Photo)); !os.IsNotExist(err) {
 		t.Errorf("photo of a forgotten person kept: %v", err)
+	}
+}
+
+func TestCollectionsAndRefresh(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	f.add("hunger", "Die Tribute von Panem - The Hunger Games", 2012, "")
+	f.add("fire", "Catching Fire", 2013, "tt1951264")
+	f.add("heat", "Heat", 1995, "") // alone in its series 77
+	rep := f.update()
+	if rep.Matched != 3 || rep.Collections != 1 || rep.CollectionsNotFound != 0 || rep.CollectionsFailed != 0 {
+		t.Fatalf("report %+v", rep)
+	}
+	cols, _ := f.store.AllCollections(ctx)
+	c, ok := cols[1234]
+	if !ok || len(cols) != 1 || c.Status != store.MetaMatched || c.Poster != "1234-collection-poster-cp.jpg" ||
+		c.Backdrop != "1234-collection-backdrop-cb.jpg" || !strings.Contains(c.Data, "Panem Filmreihe") {
+		t.Fatalf("collections: %+v", cols)
+	}
+	if _, m := f.meta("hunger"); m.Collection == nil || m.Collection.ID != 1234 || m.Version != tmdb.DataVersion {
+		t.Errorf("movie data: %+v", m)
+	}
+
+	// Data of an older version is refreshed for the same TMDB ID, without
+	// matching the file again.
+	md, _ := f.meta("heat")
+	md.Data = `{"id":11,"title":"Heat"}`
+	f.store.SaveMetadata(ctx, md)
+	f.fake.take()
+	if rep := f.update(); rep.Matched != 1 || rep.Unchanged != 2 {
+		t.Errorf("refresh: %+v", rep)
+	}
+	for _, r := range f.fake.take() {
+		if strings.HasPrefix(r, "/3/search/") || strings.HasPrefix(r, "/3/find/") {
+			t.Errorf("refresh matched again: %s", r)
+		}
+	}
+	if md, m := f.meta("heat"); md.Source != "search" || md.TMDbID != 11 || m.Version != tmdb.DataVersion {
+		t.Errorf("after refresh: %+v %+v", md, m)
+	}
+
+	// With one movie of the series left, the collection and its artwork go.
+	f.store.ApplyScan(ctx, store.ScanChanges{DeletedItemIDs: []string{"fire"}})
+	f.update()
+	if cols, _ := f.store.AllCollections(ctx); len(cols) != 0 {
+		t.Errorf("collection of one movie kept: %+v", cols)
+	}
+	old := time.Now().Add(-2 * time.Hour)
+	for _, name := range []string{c.Poster, c.Backdrop} {
+		os.Chtimes(filepath.Join(f.svc.Dir, name), old, old)
+	}
+	RemoveUnusedArtwork(ctx, f.store, f.svc.Dir, nil)
+	if _, err := os.Stat(filepath.Join(f.svc.Dir, c.Poster)); !os.IsNotExist(err) {
+		t.Errorf("collection poster kept: %v", err)
 	}
 }

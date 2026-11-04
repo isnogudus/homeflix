@@ -181,8 +181,19 @@ type Person struct {
 	Type string `json:"type"`           // Actor, Director or Writer
 }
 
+// DataVersion is the version of the movie data Movie returns. Metadata
+// stored by an older version lacks fields and is fetched again.
+const DataVersion = 1
+
+// CollectionRef names the collection (film series) a movie belongs to.
+type CollectionRef struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+
 // Movie is the metadata homeflix keeps.
 type Movie struct {
+	Version       int      `json:"v,omitempty"` // DataVersion when fetched
 	ID            int      `json:"id"`
 	IMDbID        string   `json:"imdb_id,omitempty"`
 	Title         string   `json:"title"`
@@ -197,23 +208,26 @@ type Movie struct {
 	Certification string   `json:"certification,omitempty"`
 	PosterPath    string   `json:"poster_path,omitempty"`
 	BackdropPath  string   `json:"backdrop_path,omitempty"`
+	// Collection is the film series of the movie, nil if none.
+	Collection *CollectionRef `json:"collection,omitempty"`
 }
 
 // maxCast limits the actors kept per movie.
 const maxCast = 20
 
 type movieResponse struct {
-	ID            int     `json:"id"`
-	IMDbID        string  `json:"imdb_id"`
-	Title         string  `json:"title"`
-	OriginalTitle string  `json:"original_title"`
-	Overview      string  `json:"overview"`
-	Tagline       string  `json:"tagline"`
-	ReleaseDate   string  `json:"release_date"`
-	VoteAverage   float64 `json:"vote_average"`
-	VoteCount     int     `json:"vote_count"`
-	PosterPath    string  `json:"poster_path"`
-	BackdropPath  string  `json:"backdrop_path"`
+	ID            int            `json:"id"`
+	IMDbID        string         `json:"imdb_id"`
+	Title         string         `json:"title"`
+	OriginalTitle string         `json:"original_title"`
+	Overview      string         `json:"overview"`
+	Tagline       string         `json:"tagline"`
+	ReleaseDate   string         `json:"release_date"`
+	VoteAverage   float64        `json:"vote_average"`
+	VoteCount     int            `json:"vote_count"`
+	PosterPath    string         `json:"poster_path"`
+	BackdropPath  string         `json:"backdrop_path"`
+	Collection    *CollectionRef `json:"belongs_to_collection"`
 	Genres        []struct {
 		Name string `json:"name"`
 	} `json:"genres"`
@@ -252,9 +266,12 @@ func (c *Client) Movie(ctx context.Context, id int, language string) (Movie, err
 		return Movie{}, err
 	}
 	m := Movie{
-		ID: r.ID, IMDbID: r.IMDbID, Title: r.Title, OriginalTitle: r.OriginalTitle,
+		Version: DataVersion, ID: r.ID, IMDbID: r.IMDbID, Title: r.Title, OriginalTitle: r.OriginalTitle,
 		Overview: strings.TrimSpace(r.Overview), Tagline: strings.TrimSpace(r.Tagline),
 		ReleaseDate: r.ReleaseDate, PosterPath: r.PosterPath, BackdropPath: r.BackdropPath,
+	}
+	if r.Collection != nil && r.Collection.ID > 0 {
+		m.Collection = &CollectionRef{ID: r.Collection.ID, Name: r.Collection.Name}
 	}
 	if r.VoteCount > 0 {
 		m.Rating = r.VoteAverage
@@ -371,6 +388,41 @@ func (c *Client) Person(ctx context.Context, id int, language string) (PersonDet
 		}
 	}
 	return p, nil
+}
+
+// Collection is a film series as TMDB describes it.
+type Collection struct {
+	ID           int    `json:"id"`
+	Name         string `json:"name"`
+	Overview     string `json:"overview,omitempty"`
+	PosterPath   string `json:"poster_path,omitempty"`
+	BackdropPath string `json:"backdrop_path,omitempty"`
+}
+
+// Collection fetches a film series in language ("de-DE"); English fills in
+// a missing overview or poster.
+func (c *Client) Collection(ctx context.Context, id int, language string) (Collection, error) {
+	get := func(lang string) (Collection, error) {
+		var r Collection
+		err := c.api(ctx, "/collection/"+strconv.Itoa(id), url.Values{"language": {lang}}, &r)
+		r.Overview = strings.TrimSpace(r.Overview)
+		return r, err
+	}
+	col, err := get(language)
+	if err != nil {
+		return Collection{}, err
+	}
+	if (col.Overview == "" || col.PosterPath == "") && language != "en-US" {
+		if en, err := get("en-US"); err == nil {
+			if col.Overview == "" {
+				col.Overview = en.Overview
+			}
+			if col.PosterPath == "" {
+				col.PosterPath = en.PosterPath
+			}
+		}
+	}
+	return col, nil
 }
 
 // Image fetches an image in a TMDB size such as "w780" or "original".

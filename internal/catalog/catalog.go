@@ -53,6 +53,11 @@ type Movie struct {
 
 	// Meta is what TMDB knows about the movie; nil if nothing.
 	Meta *Meta
+	// Collection is the film series the movie belongs to, nil if none.
+	Collection *Collection
+	// Set is non-nil when this is not a movie but the list entry of a
+	// collection (Type "BoxSet").
+	Set *Collection
 
 	searchKey     string
 	genreIDs      map[string]bool
@@ -103,7 +108,10 @@ type Snapshot struct {
 	genres    map[string]*Facet
 	people    map[string]*Facet
 	studios   map[string]*Facet
-	BuiltAt   time.Time
+	// collections by ID, and by name
+	collections    map[string]*Collection
+	collectionList []*Collection
+	BuiltAt        time.Time
 }
 
 // Catalog holds the current snapshot.
@@ -148,8 +156,12 @@ func (c *Catalog) Reload(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	cols, err := c.Store.AllCollections(ctx)
+	if err != nil {
+		return err
+	}
 	snap := Build(libs, items, Options{Locale: c.Locale, Articles: c.Articles, Metadata: meta, People: people,
-		MetadataDir: c.MetadataDir, Log: c.Log})
+		Collections: cols, MetadataDir: c.MetadataDir, Log: c.Log})
 	c.Set(snap)
 	if c.Log != nil {
 		c.Log.Info("catalog loaded", "movies", len(snap.movies), "took", time.Since(start).Round(time.Millisecond))
@@ -169,6 +181,7 @@ type Options struct {
 	Articles    []string
 	Metadata    map[string]store.Metadata // by item ID
 	People      map[int]store.Person      // by TMDB ID
+	Collections map[int]store.Collection  // by TMDB ID
 	MetadataDir string
 	Log         *slog.Logger
 }
@@ -226,6 +239,7 @@ func Build(libs []store.Library, items []store.Item, opt Options) *Snapshot {
 		}
 	}
 	sort.Slice(s.movies, func(i, j int) bool { return lessByName(s.movies[i], s.movies[j]) })
+	s.buildCollections(opt)
 	for _, f := range s.people {
 		if p, ok := opt.People[f.TMDbID]; ok {
 			f.applyPerson(p, opt)

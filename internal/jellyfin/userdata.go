@@ -1,6 +1,7 @@
 package jellyfin
 
 import (
+	"context"
 	"net/http"
 	"time"
 
@@ -189,39 +190,70 @@ func (s *Server) markPlayed(played bool) authedHandler {
 		if !ok {
 			return
 		}
-		p, ok := s.resolvePlayable(normalizeID(r.PathValue("itemId")), "")
+		id := normalizeID(r.PathValue("itemId"))
+		now := time.Now().UTC()
+		// A collection is played when all its movies are.
+		if c, ok := s.Catalog.Snapshot().Collection(id); ok {
+			for _, m := range c.Movies {
+				if p, ok := s.resolvePlayable(m.ID, ""); ok {
+					if _, err := s.setPlayed(r.Context(), u.ID, p, played, now); err != nil {
+						s.internalError(w, r, err)
+						return
+					}
+				}
+			}
+			s.writeCollectionUserData(w, r, u, c)
+			return
+		}
+		p, ok := s.resolvePlayable(id, "")
 		if !ok {
 			http.NotFound(w, r)
 			return
 		}
-		ctx := r.Context()
-		now := time.Now().UTC()
-		var self store.UserData
-		for _, id := range relatedIDs(p) {
-			d, err := s.Store.GetUserData(ctx, u.ID, id)
-			if err != nil {
-				s.internalError(w, r, err)
-				return
-			}
-			d.Position = 0
-			if played {
-				if !d.Played {
-					d.PlayCount++
-				}
-				d.Played, d.LastPlayed = true, now
-			} else {
-				d.Played, d.PlayCount, d.LastPlayed = false, 0, time.Time{}
-			}
-			if err := s.Store.SaveUserData(ctx, u.ID, d); err != nil {
-				s.internalError(w, r, err)
-				return
-			}
-			if id == p.id {
-				self = d
-			}
+		self, err := s.setPlayed(r.Context(), u.ID, p, played, now)
+		if err != nil {
+			s.internalError(w, r, err)
+			return
 		}
 		writeJSON(w, http.StatusOK, userDataDto(p.id, self, p.runtime))
 	}
+}
+
+// setPlayed marks a movie or part, and the later parts of a movie, played
+// or unplayed, and returns the new state of the item itself.
+func (s *Server) setPlayed(ctx context.Context, userID string, p playable, played bool, now time.Time) (store.UserData, error) {
+	var self store.UserData
+	for _, id := range relatedIDs(p) {
+		d, err := s.Store.GetUserData(ctx, userID, id)
+		if err != nil {
+			return self, err
+		}
+		d.Position = 0
+		if played {
+			if !d.Played {
+				d.PlayCount++
+			}
+			d.Played, d.LastPlayed = true, now
+		} else {
+			d.Played, d.PlayCount, d.LastPlayed = false, 0, time.Time{}
+		}
+		if err := s.Store.SaveUserData(ctx, userID, d); err != nil {
+			return self, err
+		}
+		if id == p.id {
+			self = d
+		}
+	}
+	return self, nil
+}
+
+// writeCollectionUserData answers with the user's state of a collection.
+func (s *Server) writeCollectionUserData(w http.ResponseWriter, r *http.Request, u store.User, c *catalog.Collection) {
+	user, ok := s.userState(w, r, u)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, collectionUserData(c, user))
 }
 
 func (s *Server) markFavorite(favorite bool) authedHandler {
@@ -237,8 +269,14 @@ func (s *Server) changeUserData(w http.ResponseWriter, r *http.Request, sess *Se
 	if !ok {
 		return
 	}
-	p, ok := s.resolvePlayable(normalizeID(r.PathValue("itemId")), "")
-	if !ok {
+	id := normalizeID(r.PathValue("itemId"))
+	p, ok := s.resolvePlayable(id, "")
+	c, isCollection := s.Catalog.Snapshot().Collection(id)
+	switch {
+	case isCollection:
+		// A collection keeps only its favourite flag of its own.
+		p = playable{id: c.ID}
+	case !ok:
 		http.NotFound(w, r)
 		return
 	}
@@ -253,6 +291,10 @@ func (s *Server) changeUserData(w http.ResponseWriter, r *http.Request, sess *Se
 			s.internalError(w, r, err)
 			return
 		}
+	}
+	if isCollection {
+		s.writeCollectionUserData(w, r, u, c)
+		return
 	}
 	writeJSON(w, http.StatusOK, userDataDto(p.id, d, p.runtime))
 }

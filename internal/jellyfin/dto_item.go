@@ -47,6 +47,7 @@ type BaseItemDto struct {
 	LocalTrailerCount       int                          `json:"LocalTrailerCount"`
 	UserData                UserItemDataDto              `json:"UserData"`
 	ChildCount              *int                         `json:"ChildCount,omitempty"`
+	RecursiveItemCount      *int                         `json:"RecursiveItemCount,omitempty"`
 	SpecialFeatureCount     int                          `json:"SpecialFeatureCount"`
 	DisplayPreferencesID    string                       `json:"DisplayPreferencesId,omitempty"`
 	Tags                    []string                     `json:"Tags"`
@@ -98,6 +99,7 @@ type UserItemDataDto struct {
 	Played                bool       `json:"Played"`
 	LastPlayedDate        *time.Time `json:"LastPlayedDate,omitempty"`
 	PlayedPercentage      float64    `json:"PlayedPercentage,omitempty"`
+	UnplayedItemCount     *int       `json:"UnplayedItemCount,omitempty"`
 	Key                   string     `json:"Key"`
 	ItemID                string     `json:"ItemId"`
 }
@@ -455,6 +457,9 @@ func describeFile(d *BaseItemDto, info media.Info) {
 // itemDto describes a movie or extra. A nil fieldSet means all fields, as
 // for single-item requests. user holds the requesting user's state.
 func (s *Server) itemDto(m *catalog.Movie, fields fieldSet, sess *Session, user map[string]store.UserData) BaseItemDto {
+	if m.Set != nil {
+		return s.collectionDto(m.Set, fields, user)
+	}
 	d := s.baseDto(m, m.ID)
 	describeMeta(&d, m, fields, s.Catalog.Snapshot())
 	d.UserData = userDataDto(m.ID, user[m.ID], runtimeOf(m))
@@ -581,6 +586,82 @@ func describePerson(d *BaseItemDto, f *catalog.Facet, fields fieldSet) {
 		d.ImageTags[string(images.Primary)] = tag
 		d.PrimaryImageAspectRatio = images.PosterAspect
 	}
+}
+
+// collectionDto describes a collection (film series) as a Jellyfin box set.
+func (s *Server) collectionDto(c *catalog.Collection, fields fieldSet, user map[string]store.UserData) BaseItemDto {
+	n := len(c.Movies)
+	e := c.Entry()
+	tmdbID := strconv.Itoa(c.TMDbID)
+	d := BaseItemDto{
+		Name:               c.Name,
+		ServerID:           s.ServerID,
+		ID:                 c.ID,
+		DateCreated:        timePtr(e.DateCreated),
+		SortName:           e.SortTitle,
+		ExternalUrls:       []ExternalURL{{Name: "TMDB", URL: "https://www.themoviedb.org/collection/" + tmdbID}},
+		Taglines:           []string{},
+		Genres:             []string{},
+		ProductionYear:     e.Year,
+		ProviderIDs:        map[string]string{"Tmdb": tmdbID},
+		IsFolder:           true,
+		ParentID:           e.LibraryID,
+		Type:               "BoxSet",
+		People:             []PersonDto{},
+		Studios:            []NameIDPair{},
+		GenreItems:         []NameIDPair{},
+		UserData:           collectionUserData(c, user),
+		ChildCount:         &n,
+		RecursiveItemCount: &n,
+		Tags:               []string{},
+		ImageTags:          map[string]string{},
+		BackdropImageTags:  []string{},
+		ImageBlurHashes:    map[string]map[string]string{},
+		LocationType:       "FileSystem",
+		MediaType:          "Unknown",
+		RemoteTrailers:     []any{},
+		PlayAccess:         "Full",
+	}
+	if fields.has("Overview") {
+		d.Overview = c.Overview
+	}
+	if t := e.Meta; t != nil {
+		if p := t.Premiere(); !p.IsZero() {
+			d.PremiereDate = &p
+		}
+	}
+	if tag := images.CollectionTag(c, images.Primary); tag != "" {
+		d.ImageTags[string(images.Primary)] = tag
+		d.PrimaryImageAspectRatio = images.PosterAspect
+	}
+	if tag := images.CollectionTag(c, images.Backdrop); tag != "" {
+		d.BackdropImageTags = []string{tag}
+		d.ImageTags[string(images.Thumb)] = tag
+	}
+	return d
+}
+
+// collectionUserData is the user's state of a collection: played when all
+// its movies are, a favourite of its own.
+func collectionUserData(c *catalog.Collection, user map[string]store.UserData) UserItemDataDto {
+	unplayed := 0
+	for _, m := range c.Movies {
+		if !user[m.ID].Played {
+			unplayed++
+		}
+	}
+	own := user[c.ID]
+	u := UserItemDataDto{
+		IsFavorite:        own.IsFavorite,
+		Played:            unplayed == 0,
+		UnplayedItemCount: &unplayed,
+		Key:               c.ID,
+		ItemID:            c.ID,
+	}
+	if played := len(c.Movies) - unplayed; played > 0 {
+		u.PlayedPercentage = 100 * float64(played) / float64(len(c.Movies))
+	}
+	return u
 }
 
 // viewDto describes a library as a collection folder.

@@ -16,6 +16,7 @@ const arrivalDE = `{
   "overview": "Als zwölf außerirdische Raumschiffe landen ...", "tagline": "Warum sind sie hier?",
   "release_date": "2016-09-02", "vote_average": 7.6, "vote_count": 19000,
   "poster_path": "/de-poster.jpg", "backdrop_path": "/backdrop.jpg",
+  "belongs_to_collection": {"id": 1, "name": "Arrival Filmreihe", "poster_path": "/c.jpg"},
   "genres": [{"id": 18, "name": "Drama"}, {"id": 878, "name": "Science Fiction"}],
   "production_companies": [{"id": 1, "name": "FilmNation Entertainment"}],
   "credits": {
@@ -76,6 +77,10 @@ func newFake(t *testing.T) (*fakeTMDB, *Client) {
 		case r.URL.Path == "/3/person/9273" && q.Get("append_to_response") == "translations":
 			// No German biography: the English one comes in the translations.
 			w.Write([]byte(amyAdams))
+		case r.URL.Path == "/3/collection/10" && q.Get("language") == "de-DE":
+			w.Write([]byte(`{"id": 10, "name": "Star Wars Filmreihe", "overview": "", "poster_path": null, "backdrop_path": "/sw-b.jpg"}`))
+		case r.URL.Path == "/3/collection/10" && q.Get("language") == "en-US":
+			w.Write([]byte(`{"id": 10, "name": "Star Wars Collection", "overview": "A space opera.", "poster_path": "/sw-p.jpg"}`))
 		case r.URL.Path == "/t/p/w780/de-poster.jpg":
 			w.Write([]byte("JPEG"))
 		default:
@@ -118,6 +123,9 @@ func TestFindSearchMovieImage(t *testing.T) {
 	}
 	if strings.Join(kinds, ",") != "Director:Denis Villeneuve,Writer:Eric Heisserer,Actor:Amy Adams,Actor:Jeremy Renner" {
 		t.Errorf("people: %v", kinds)
+	}
+	if m.Version != DataVersion || m.Collection == nil || *m.Collection != (CollectionRef{ID: 1, Name: "Arrival Filmreihe"}) {
+		t.Errorf("version %d, collection %+v", m.Version, m.Collection)
 	}
 	if m.People[2].Role != "Louise Banks" {
 		t.Errorf("role: %+v", m.People[2])
@@ -170,5 +178,20 @@ func TestPerson(t *testing.T) {
 	}
 	if _, err := c.Person(context.Background(), 1, "de-DE"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("unknown person: %v", err)
+	}
+}
+
+func TestCollection(t *testing.T) {
+	_, c := newFake(t)
+	col, err := c.Collection(context.Background(), 10, "de-DE")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Collection{ID: 10, Name: "Star Wars Filmreihe", Overview: "A space opera.", PosterPath: "/sw-p.jpg", BackdropPath: "/sw-b.jpg"}
+	if col != want {
+		t.Errorf("collection:\n got %+v\nwant %+v", col, want)
+	}
+	if _, err := c.Collection(context.Background(), 11, "de-DE"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("unknown collection: %v", err)
 	}
 }

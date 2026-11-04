@@ -194,9 +194,11 @@ and year, once per movie, fetches the details and two images, and keeps
 them in the data directory.
 Then it fetches, once per person, the biography, dates and place of birth
 and death, and portrait of the directors, writers and first 20 actors of
-each movie, asking TMDB by its own ID of the person.
-A movie is looked up again only when its file name changes; a movie or
-person that was not found is retried after 30 days.
+each movie, and the name, overview and artwork of every film series that
+two or more movies of the libraries belong to, asking TMDB by its own IDs
+of people and series.
+A movie is looked up again only when its file name changes; a movie,
+person or series that was not found is retried after 30 days.
 The block holds:
 .Bl -tag -width Ds
 .It Ic token file Ar path
