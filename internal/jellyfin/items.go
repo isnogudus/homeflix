@@ -140,6 +140,9 @@ func (s *Server) viewsResult() QueryResult[BaseItemDto] {
 	for _, l := range snap.Libraries {
 		out.Items = append(out.Items, s.viewDto(l))
 	}
+	if v, ok := snap.CollectionsView(); ok {
+		out.Items = append(out.Items, s.viewDto(v))
+	}
 	out.TotalRecordCount = len(out.Items)
 	return out
 }
@@ -296,6 +299,8 @@ func (s *Server) getItems(w http.ResponseWriter, r *http.Request, sess *Session)
 	if parent != "" {
 		if c, ok := snap.Collection(parent); ok {
 			q.CollectionID, q.Kinds = c.ID, catalog.MoviesOnly
+		} else if parent == catalog.CollectionsViewID {
+			q.Kinds = catalog.CollectionsOnly
 		} else if _, ok := snap.Library(parent); ok {
 			q.LibraryID = parent
 		} else {
@@ -326,6 +331,9 @@ func (s *Server) anyItemDto(snap *catalog.Snapshot, id string, fields fieldSet, 
 	}
 	if l, ok := snap.Library(id); ok {
 		return s.viewDto(l), true
+	}
+	if v, ok := snap.CollectionsView(); ok && id == v.ID {
+		return s.viewDto(v), true
 	}
 	if c, ok := snap.Collection(id); ok {
 		return s.collectionDto(c, fields, user), true
@@ -493,10 +501,10 @@ func (s *Server) itemCounts(w http.ResponseWriter, r *http.Request, sess *Sessio
 func (s *Server) ancestors(w http.ResponseWriter, r *http.Request, sess *Session) {
 	snap := s.Catalog.Snapshot()
 	id := normalizeID(r.PathValue("itemId"))
-	if c, ok := snap.Collection(id); ok {
+	if _, ok := snap.Collection(id); ok {
 		out := []BaseItemDto{}
-		if l, ok := snap.Library(c.Entry().LibraryID); ok {
-			out = append(out, s.viewDto(l))
+		if v, ok := snap.CollectionsView(); ok {
+			out = append(out, s.viewDto(v))
 		}
 		writeJSON(w, http.StatusOK, out)
 		return

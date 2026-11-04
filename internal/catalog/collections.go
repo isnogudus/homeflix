@@ -28,6 +28,24 @@ type Collection struct {
 	entry *Movie
 }
 
+// CollectionsViewID is the ID of the view that holds all collections, as
+// Jellyfin's "Collections" folder.
+var CollectionsViewID = facetID("view", "collections")
+
+// CollectionsView returns that view, named in the catalog's language; there
+// is none without collections.
+func (s *Snapshot) CollectionsView() (Library, bool) {
+	if len(s.collectionList) == 0 {
+		return Library{}, false
+	}
+	name := "Collections"
+	if s.locale == "de" {
+		name = "Sammlungen"
+	}
+	return Library{Library: store.Library{ID: CollectionsViewID, Name: name, CollectionType: "boxsets"},
+		Movies: len(s.collectionList)}, true
+}
+
 // CollectionID returns the ID clients address a collection by.
 func CollectionID(tmdbID int) string { return facetID("collection", strconv.Itoa(tmdbID)) }
 

@@ -43,7 +43,7 @@ Users are created, changed and deleted with `homeflix user` only.
 
 | Endpoint | Auth | Notes |
 |---|---|---|
-| `GET /UserViews`, `GET /Users/{userId}/Views` | yes | one view per library |
+| `GET /UserViews`, `GET /Users/{userId}/Views` | yes | one view per library, and a view "Collections" ("Sammlungen" with `language de`) of type `boxsets` holding all collections, as Jellyfin's collections folder |
 | `GET\|POST /DisplayPreferences/{id}` | yes | stored per user, client and ID |
 
 ## Items
@@ -59,6 +59,7 @@ Users are created, changed and deleted with `homeflix user` only.
 | `GET /Items/{itemId}/Ancestors` | yes | parent movie of an extra, and the library |
 | `GET /Items?IncludeItemTypes=BoxSet` | yes | collections: film series that two or more movies belong to, from TMDB; filters match their movies |
 | `GET /Items?IncludeItemTypes=Movie,BoxSet&CollapseBoxSetItems=true` | yes | movies with collections in place of their movies, unless movie filters (genre, year, play state, …) are set, as in Jellyfin |
+| `GET /Items?ParentId={collectionsViewId}` | yes | all collections |
 | `GET /Items?ParentId={collectionId}` | yes | the movies of a collection, by premiere date unless `SortBy` says otherwise |
 | `GET /Items/{collectionId}` | yes | a collection as `BoxSet` with overview, child count and `UserData.UnplayedItemCount` |
 | `GET /Items/{itemId}/Similar` | yes | most shared genres, then closest year |

@@ -137,8 +137,9 @@ at ten requests a second and about 1 GB for the portraits.
 All network access goes through `internal/outbound`, which only reaches the
 hosts it was created for; a test fails if any other code opens connections.
 
-Film series show up in clients as collections (Jellyfin box sets): in their
-own row, and in place of their movies when a client groups the library into
+Film series show up in clients as collections (Jellyfin box sets): in a
+view of their own next to the libraries, in a row of the home screen, and
+in place of their movies when a client groups the library into
 collections. Collections are built from TMDB data only; they cannot be
 edited.
 

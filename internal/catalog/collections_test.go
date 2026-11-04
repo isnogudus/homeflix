@@ -57,6 +57,13 @@ func TestCollections(t *testing.T) {
 	if got, ok := s.Collection(c.ID); !ok || got != c {
 		t.Error("lookup by ID")
 	}
+	if v, ok := s.CollectionsView(); !ok || v.ID != CollectionsViewID || v.Name != "Collections" ||
+		v.CollectionType != "boxsets" || v.Movies != 1 {
+		t.Errorf("collections view: %+v", v)
+	}
+	if _, ok := testSnapshot().CollectionsView(); ok {
+		t.Error("collections view without collections")
+	}
 
 	name := []string{"SortName"}
 	for what, tc := range map[string]struct {

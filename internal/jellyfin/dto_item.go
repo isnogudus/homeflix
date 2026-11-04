@@ -605,7 +605,7 @@ func (s *Server) collectionDto(c *catalog.Collection, fields fieldSet, user map[
 		ProductionYear:     e.Year,
 		ProviderIDs:        map[string]string{"Tmdb": tmdbID},
 		IsFolder:           true,
-		ParentID:           e.LibraryID,
+		ParentID:           catalog.CollectionsViewID,
 		Type:               "BoxSet",
 		People:             []PersonDto{},
 		Studios:            []NameIDPair{},

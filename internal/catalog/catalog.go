@@ -111,6 +111,7 @@ type Snapshot struct {
 	// collections by ID, and by name
 	collections    map[string]*Collection
 	collectionList []*Collection
+	locale         media.Locale
 	BuiltAt        time.Time
 }
 
@@ -239,6 +240,7 @@ func Build(libs []store.Library, items []store.Item, opt Options) *Snapshot {
 		}
 	}
 	sort.Slice(s.movies, func(i, j int) bool { return lessByName(s.movies[i], s.movies[j]) })
+	s.locale = opt.Locale
 	s.buildCollections(opt)
 	for _, f := range s.people {
 		if p, ok := opt.People[f.TMDbID]; ok {

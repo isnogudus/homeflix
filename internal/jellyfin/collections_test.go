@@ -74,7 +74,7 @@ func TestCollectionsInItems(t *testing.T) {
 	}
 	set := grouped.Items[1]
 	if set.Type != "BoxSet" || set.ID != colID || !set.IsFolder || *set.ChildCount != 2 || set.ProductionYear != 2012 ||
-		set.ImageTags["Primary"] == "" || set.ParentID != libID || *set.UserData.UnplayedItemCount != 2 {
+		set.ImageTags["Primary"] == "" || set.ParentID != catalog.CollectionsViewID || *set.UserData.UnplayedItemCount != 2 {
 		t.Errorf("box set: %+v", set)
 	}
 	// Without grouping, and with a filter that turns grouping off.
@@ -84,8 +84,19 @@ func TestCollectionsInItems(t *testing.T) {
 	if got := list("ParentId=" + libID + "&IncludeItemTypes=Movie,BoxSet&CollapseBoxSetItems=true&Recursive=true&Years=2013"); names(got.Items) != "Catching Fire" {
 		t.Errorf("filtered: %s", names(got.Items))
 	}
-	// The collections row, and the scan Moonfin makes for a movie's series.
-	for _, q := range []string{"IncludeItemTypes=BoxSet&Recursive=true", "ParentId=" + libID + "&IncludeItemTypes=BoxSet&Recursive=true&SortBy=SortName"} {
+	// The collections view next to the libraries, as Jellyfin's folder.
+	views := decode[QueryResult[BaseItemDto]](t, c.do("GET", "/UserViews", "", nil))
+	if names(views.Items) != "Filme, Sammlungen" || views.Items[1].CollectionType != "boxsets" ||
+		views.Items[1].ID != catalog.CollectionsViewID || *views.Items[1].ChildCount != 1 {
+		t.Errorf("views: %+v", views.Items)
+	}
+	if v := decode[BaseItemDto](t, c.do("GET", "/Items/"+catalog.CollectionsViewID, "", nil)); v.Name != "Sammlungen" {
+		t.Errorf("collections view item: %+v", v)
+	}
+	// The collections view's content, the collections row, and the scan
+	// Moonfin makes for a movie's series.
+	for _, q := range []string{"ParentId=" + catalog.CollectionsViewID + "&IncludeItemTypes=BoxSet&Recursive=true&SortBy=SortName",
+		"IncludeItemTypes=BoxSet&Recursive=true", "ParentId=" + libID + "&IncludeItemTypes=BoxSet&Recursive=true&SortBy=SortName"} {
 		if got := list(q); names(got.Items) != "Die Tribute von Panem Filmreihe" {
 			t.Errorf("%s: %s", q, names(got.Items))
 		}
@@ -99,7 +110,7 @@ func TestCollectionsInItems(t *testing.T) {
 	if details.Type != "BoxSet" || details.Overview != "Die Reihe." || details.ProviderIDs["Tmdb"] != "1234" {
 		t.Errorf("details: %+v", details)
 	}
-	if anc := decode[[]BaseItemDto](t, c.do("GET", "/Items/"+colID+"/Ancestors", "", nil)); names(anc) != "Filme" {
+	if anc := decode[[]BaseItemDto](t, c.do("GET", "/Items/"+colID+"/Ancestors", "", nil)); names(anc) != "Sammlungen" {
 		t.Errorf("ancestors: %s", names(anc))
 	}
 	if x := decode[[]BaseItemDto](t, c.do("GET", "/Items/"+colID+"/SpecialFeatures", "", nil)); len(x) != 0 {
