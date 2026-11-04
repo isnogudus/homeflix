@@ -144,7 +144,11 @@ func (c *Catalog) Reload(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	snap := Build(libs, items, Options{Locale: c.Locale, Articles: c.Articles, Metadata: meta,
+	people, err := c.Store.AllPeople(ctx)
+	if err != nil {
+		return err
+	}
+	snap := Build(libs, items, Options{Locale: c.Locale, Articles: c.Articles, Metadata: meta, People: people,
 		MetadataDir: c.MetadataDir, Log: c.Log})
 	c.Set(snap)
 	if c.Log != nil {
@@ -164,6 +168,7 @@ type Options struct {
 	Locale      media.Locale
 	Articles    []string
 	Metadata    map[string]store.Metadata // by item ID
+	People      map[int]store.Person      // by TMDB ID
 	MetadataDir string
 	Log         *slog.Logger
 }
@@ -221,6 +226,11 @@ func Build(libs []store.Library, items []store.Item, opt Options) *Snapshot {
 		}
 	}
 	sort.Slice(s.movies, func(i, j int) bool { return lessByName(s.movies[i], s.movies[j]) })
+	for _, f := range s.people {
+		if p, ok := opt.People[f.TMDbID]; ok {
+			f.applyPerson(p, opt)
+		}
+	}
 	for _, l := range libs {
 		s.Libraries = append(s.Libraries, Library{Library: l, Movies: counts[l.ID]})
 	}

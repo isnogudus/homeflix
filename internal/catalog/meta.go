@@ -24,13 +24,7 @@ type Meta struct {
 }
 
 // Premiere returns the release date, or the zero time.
-func (m *Meta) Premiere() time.Time {
-	t, err := time.Parse("2006-01-02", m.ReleaseDate)
-	if err != nil {
-		return time.Time{}
-	}
-	return t
-}
+func (m *Meta) Premiere() time.Time { return parseDate(m.ReleaseDate) }
 
 // Name is the title clients show: TMDB's if the movie was matched.
 func (m *Movie) Name() string {
@@ -46,6 +40,47 @@ type Facet struct {
 	Name   string
 	TMDbID int // people only
 	Movies int
+	// Person is what TMDB knows about a person, nil if nothing yet.
+	Person *PersonInfo
+}
+
+// PersonInfo describes a member of cast or crew.
+type PersonInfo struct {
+	tmdb.PersonDetails
+	// PhotoFile is the local portrait, "" if there is none.
+	PhotoFile string
+}
+
+// Born and Died return the dates of birth and death, or the zero time.
+func (p *PersonInfo) Born() time.Time { return parseDate(p.Birthday) }
+func (p *PersonInfo) Died() time.Time { return parseDate(p.Deathday) }
+
+func parseDate(s string) time.Time {
+	t, err := time.Parse("2006-01-02", s)
+	if err != nil {
+		return time.Time{}
+	}
+	return t
+}
+
+func (f *Facet) applyPerson(p store.Person, opt Options) {
+	if p.Status != store.MetaMatched || p.Data == "" {
+		return
+	}
+	info := &PersonInfo{}
+	if err := json.Unmarshal([]byte(p.Data), &info.PersonDetails); err != nil {
+		if opt.Log != nil {
+			opt.Log.Warn("unreadable person", "name", f.Name, "err", err)
+		}
+		return
+	}
+	if p.Photo != "" && opt.MetadataDir != "" {
+		path := filepath.Join(opt.MetadataDir, p.Photo)
+		if _, err := os.Stat(path); err == nil {
+			info.PhotoFile = path
+		}
+	}
+	f.Person = info
 }
 
 // facetID derives a stable 32-digit ID from a kind and a key.

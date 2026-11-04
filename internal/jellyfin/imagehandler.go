@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"homeflix/internal/catalog"
 	"homeflix/internal/images"
 )
 
@@ -28,6 +29,10 @@ func (s *Server) itemImage(w http.ResponseWriter, r *http.Request) {
 	}
 	snap := s.Catalog.Snapshot()
 	id := normalizeID(r.PathValue("itemId"))
+	if f, ok := snap.Person(id); ok {
+		s.personImage(w, r, f, kind)
+		return
+	}
 	m, ok := snap.Item(id)
 	if !ok {
 		// Later parts of a movie show the movie's artwork.
@@ -47,13 +52,7 @@ func (s *Server) itemImage(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	size := images.Size{
-		MaxWidth: intParam(r, "maxWidth", 0), MaxHeight: intParam(r, "maxHeight", 0),
-		Width: intParam(r, "width", 0), Height: intParam(r, "height", 0),
-		FillWidth: intParam(r, "fillWidth", 0), FillHeight: intParam(r, "fillHeight", 0),
-		Quality: intParam(r, "quality", 0),
-	}
-	path, err := s.Images.Get(r.Context(), m, kind, size)
+	path, err := s.Images.Get(r.Context(), m, kind, imageSize(r))
 	if err != nil {
 		if errors.Is(err, images.ErrNoImage) || r.Context().Err() != nil {
 			http.NotFound(w, r)
@@ -63,6 +62,37 @@ func (s *Server) itemImage(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	s.serveImage(w, r, path, tag)
+}
+
+func imageSize(r *http.Request) images.Size {
+	return images.Size{
+		MaxWidth: intParam(r, "maxWidth", 0), MaxHeight: intParam(r, "maxHeight", 0),
+		Width: intParam(r, "width", 0), Height: intParam(r, "height", 0),
+		FillWidth: intParam(r, "fillWidth", 0), FillHeight: intParam(r, "fillHeight", 0),
+		Quality: intParam(r, "quality", 0),
+	}
+}
+
+// personImage serves the portrait of a person.
+func (s *Server) personImage(w http.ResponseWriter, r *http.Request, f *catalog.Facet, kind images.Kind) {
+	tag := images.PhotoTag(f)
+	if kind != images.Primary || tag == "" {
+		http.NotFound(w, r)
+		return
+	}
+	path, err := s.Images.Photo(f, imageSize(r))
+	if err != nil {
+		s.Log.Warn("image unavailable", "person", f.Name, "err", err)
+		http.NotFound(w, r)
+		return
+	}
+	s.serveImage(w, r, path, tag)
+}
+
+// serveImage sends a cached JPEG; with the current tag in the request,
+// clients may keep it forever.
+func (s *Server) serveImage(w http.ResponseWriter, r *http.Request, path, tag string) {
 	f, err := os.Open(path)
 	if err != nil {
 		s.internalError(w, r, err)

@@ -51,7 +51,7 @@ Users are created, changed and deleted with `homeflix user` only.
 | Endpoint | Auth | Notes |
 |---|---|---|
 | `GET /Items`, `GET /Users/{userId}/Items` | yes | `ParentId`, `IncludeItemTypes`, `ExcludeItemTypes`, `Recursive`, `Ids`, `SortBy` (name, year, premiere date, rating, age rating, date added, runtime, date played, play count, favourite, played, random), `SortOrder`, `StartIndex`, `Limit`, `Fields`, `Filters` (IsPlayed, IsUnplayed, IsFavorite, IsResumable), `IsPlayed`, `IsFavorite`, `SearchTerm`, `NameStartsWith`, `NameStartsWithOrGreater`, `NameLessThan`, `Genres`, `GenreIds`, `PersonIds`, `Studios`, `StudioIds`, `Years`, `HasSubtitles`, `IsHd`, `AudioLanguages`, `SubtitleLanguages`, `HasTrailer`, `HasSpecialFeature`, `AnyProviderIdEquals` |
-| `GET /Items/{itemId}`, `GET /Users/{userId}/Items/{itemId}` | yes | movies, versions, parts and extras with media sources, streams and chapters |
+| `GET /Items/{itemId}`, `GET /Users/{userId}/Items/{itemId}` | yes | movies, versions, parts and extras with media sources, streams and chapters; `People` carry `PrimaryImageTag` for their portraits |
 | `GET /Items/Latest`, `GET /Users/{userId}/Items/Latest` | yes | by date added |
 | `GET /UserItems/Resume`, `GET /Users/{userId}/Items/Resume` | yes | started, not finished |
 | `GET /Items/Filters`, `GET /Items/Filters2` | yes | genres and years of a view |
@@ -64,13 +64,14 @@ Users are created, changed and deleted with `homeflix user` only.
 | `GET /Items/{itemId}/ThemeMedia` | yes | empty |
 | `GET /MediaSegments/{itemId}` | yes | empty |
 | `GET /Shows/NextUp` | yes | empty: homeflix has no series |
-| `GET /Genres`, `GET /Persons`, `GET /Studios` | yes | from TMDB metadata |
+| `GET /Genres`, `GET /Persons`, `GET /Studios` | yes | from TMDB metadata; people with portrait tag, and their biography with `Fields=Overview` |
+| `GET /Items/{personId}` | yes | a person: biography (`Overview`), birth (`PremiereDate`, `ProductionYear`), death (`EndDate`), place of birth (`ProductionLocations`), TMDB and IMDb IDs |
 
 ## Images
 
 | Endpoint | Auth | Notes |
 |---|---|---|
-| `GET /Items/{itemId}/Images/{type}[/{index}]` | no | Primary, Backdrop and Thumb, index 0 only; `maxWidth`, `maxHeight`, `width`, `height`, `fillWidth`, `fillHeight`, `quality`; immutable caching when `tag` matches |
+| `GET /Items/{itemId}/Images/{type}[/{index}]` | no | Primary, Backdrop and Thumb, index 0 only; for people the portrait as Primary; `maxWidth`, `maxHeight`, `width`, `height`, `fillWidth`, `fillHeight`, `quality`; immutable caching when `tag` matches |
 
 Images need no token, as in Jellyfin: clients load them through image
 caches that send no credentials.

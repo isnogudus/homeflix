@@ -303,13 +303,13 @@ func (s *Server) anyItemDto(snap *catalog.Snapshot, id string, fields fieldSet, 
 		return s.viewDto(l), true
 	}
 	if f, ok := snap.Genre(id); ok {
-		return s.facetDto(f, "Genre"), true
+		return s.facetDto(f, "Genre", fields), true
 	}
 	if f, ok := snap.Person(id); ok {
-		return s.facetDto(f, "Person"), true
+		return s.facetDto(f, "Person", fields), true
 	}
 	if f, ok := snap.Studio(id); ok {
-		return s.facetDto(f, "Studio"), true
+		return s.facetDto(f, "Studio", fields), true
 	}
 	return BaseItemDto{}, false
 }
@@ -322,9 +322,10 @@ func (s *Server) facets(kind, typ string) authedHandler {
 		if search == "" {
 			search = queryValue(r, "NameStartsWith")
 		}
+		fields := parseFields(queryValue(r, "Fields"))
 		var items []BaseItemDto
 		for _, f := range s.Catalog.Snapshot().Facets(kind, normalizeID(queryValue(r, "ParentId")), search) {
-			items = append(items, s.facetDto(f, typ))
+			items = append(items, s.facetDto(f, typ, fields))
 		}
 		writeJSON(w, http.StatusOK, page(items, intParam(r, "StartIndex", 0), intParam(r, "Limit", 0)))
 	}

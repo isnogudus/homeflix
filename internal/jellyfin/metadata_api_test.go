@@ -29,9 +29,17 @@ func metadataServer(t *testing.T) (*Server, *apiClient) {
 	s := newTestServer(t, nil)
 	dir := t.TempDir()
 	poster := "329865-poster-p.jpg"
-	f, _ := os.Create(filepath.Join(dir, poster))
-	jpeg.Encode(f, image.NewRGBA(image.Rect(0, 0, 400, 600)), nil)
-	f.Close()
+	for name, size := range map[string]image.Rectangle{poster: image.Rect(0, 0, 400, 600), "9273-profile-a.jpg": image.Rect(0, 0, 420, 632)} {
+		f, _ := os.Create(filepath.Join(dir, name))
+		jpeg.Encode(f, image.NewRGBA(size), nil)
+		f.Close()
+	}
+	amy, _ := json.Marshal(tmdb.PersonDetails{ID: 9273, Name: "Amy Adams", Biography: "Amy Lou Adams ist eine Schauspielerin.",
+		Birthday: "1974-08-20", PlaceOfBirth: "Vicenza, Italien", IMDbID: "nm0010736", ProfilePath: "/a.jpg"})
+	people := map[int]store.Person{
+		9273: {TMDbID: 9273, Status: store.MetaMatched, Data: string(amy), Photo: "9273-profile-a.jpg"},
+		// Denis Villeneuve has not been looked up yet.
+	}
 
 	probe := fixture(t, "twelve-years")
 	item := func(id, title string, year int) store.Item {
@@ -59,7 +67,7 @@ func metadataServer(t *testing.T) (*Server, *apiClient) {
 		"c0000000000000000000000000000001": {ItemID: "c0000000000000000000000000000001", Status: store.MetaNotFound},
 	}
 	s.Catalog.Set(catalog.Build([]store.Library{{ID: libID, Name: "Filme", CollectionType: "movies"}}, items,
-		catalog.Options{Locale: "de", Articles: []string{"die", "the"}, Metadata: meta, MetadataDir: dir}))
+		catalog.Options{Locale: "de", Articles: []string{"die", "the"}, Metadata: meta, People: people, MetadataDir: dir}))
 	s.Images = &images.Service{FFmpeg: "/nonexistent/ffmpeg", Dir: filepath.Join(dir, "cache"), Workers: 1}
 	addUser(t, s, "anna", "pw", false)
 	c := &apiClient{t: t, h: s.Handler()}
@@ -147,5 +155,57 @@ func TestPosterFromTMDB(t *testing.T) {
 	}
 	if img, err := jpeg.Decode(rec.Body); err != nil || img.Bounds().Dx() != 200 || img.Bounds().Dy() != 300 {
 		t.Errorf("poster %v, %v", img.Bounds(), err)
+	}
+}
+
+func TestPersonDetailsAndPhoto(t *testing.T) {
+	s, c := metadataServer(t)
+	amyID, denisID := catalog.PersonID(9273), catalog.PersonID(137427)
+	movie := decode[BaseItemDto](t, c.do("GET", "/Items/a0000000000000000000000000000001", "", nil))
+	tags := map[string]string{}
+	for _, p := range movie.People {
+		tags[p.ID] = p.PrimaryImageTag
+	}
+	if tags[amyID] == "" || tags[denisID] != "" {
+		t.Errorf("cast image tags: %v", tags)
+	}
+
+	amy := decode[BaseItemDto](t, c.do("GET", "/Items/"+amyID, "", nil))
+	if amy.Overview != "Amy Lou Adams ist eine Schauspielerin." || amy.PremiereDate == nil ||
+		amy.PremiereDate.Format("2006-01-02") != "1974-08-20" || amy.ProductionYear != 1974 || amy.EndDate != nil ||
+		strings.Join(amy.ProductionLocations, "") != "Vicenza, Italien" ||
+		amy.ProviderIDs["Imdb"] != "nm0010736" || amy.ProviderIDs["Tmdb"] != "9273" ||
+		amy.ImageTags["Primary"] != tags[amyID] || len(amy.ExternalUrls) != 2 {
+		t.Errorf("person details: %+v", amy)
+	}
+	// Lists carry the biography only when asked for.
+	list := decode[QueryResult[BaseItemDto]](t, c.do("GET", "/Persons?SearchTerm=adams", "", nil))
+	if len(list.Items) != 1 || list.Items[0].Overview != "" || list.Items[0].ImageTags["Primary"] == "" {
+		t.Errorf("person list: %+v", list.Items)
+	}
+	list = decode[QueryResult[BaseItemDto]](t, c.do("GET", "/Persons?SearchTerm=adams&Fields=Overview", "", nil))
+	if list.Items[0].Overview == "" {
+		t.Error("person list lacks the requested biography")
+	}
+	if denis := decode[BaseItemDto](t, c.do("GET", "/Items/"+denisID, "", nil)); len(denis.ImageTags) != 0 || denis.Overview != "" {
+		t.Errorf("person without details: %+v", denis)
+	}
+
+	get := func(path string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
+		return rec
+	}
+	rec := get("/Items/" + amyID + "/Images/Primary?fillHeight=300&fillWidth=200&tag=" + tags[amyID])
+	if rec.Code != 200 || !strings.Contains(rec.Header().Get("Cache-Control"), "immutable") {
+		t.Fatalf("photo: %d %v", rec.Code, rec.Header())
+	}
+	if img, err := jpeg.Decode(rec.Body); err != nil || img.Bounds().Dx() != 200 || img.Bounds().Dy() != 300 {
+		t.Errorf("photo %v, %v", img.Bounds(), err)
+	}
+	for _, p := range []string{"/Items/" + denisID + "/Images/Primary", "/Items/" + amyID + "/Images/Backdrop"} {
+		if rec := get(p); rec.Code != 404 {
+			t.Errorf("%s: %d, want 404", p, rec.Code)
+		}
 	}
 }

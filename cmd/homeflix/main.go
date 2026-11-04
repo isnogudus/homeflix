@@ -172,9 +172,10 @@ func serve(args []string, stdout, stderr io.Writer) error {
 		go func() {
 			defer background.Done()
 			defer warming.Store(false)
-			movies := cat.Snapshot().AllMovies()
+			snap := cat.Snapshot()
+			movies := snap.AllMovies()
 			subs.RemoveUnused(movies)
-			imgs.Warm(ctx, movies)
+			imgs.Warm(ctx, movies, snap.Facets("person", "", ""))
 		}()
 	}
 	scanner := newScanner(cfg, db, log)
@@ -193,9 +194,11 @@ func serve(args []string, stdout, stderr io.Writer) error {
 				case err != nil && ctx.Err() == nil:
 					log.Error("metadata update failed", "err", err)
 				}
-				if mrep.Matched+mrep.NotFound+mrep.Failed > 0 {
+				if mrep.Changed() {
 					log.Info("metadata updated", "matched", mrep.Matched, "not_found", mrep.NotFound,
-						"failed", mrep.Failed, "unchanged", mrep.Unchanged, "took", mrep.Took.Round(time.Second))
+						"failed", mrep.Failed, "unchanged", mrep.Unchanged, "people", mrep.People,
+						"people_not_found", mrep.PeopleNotFound, "people_failed", mrep.PeopleFailed,
+						"took", mrep.Took.Round(time.Second))
 					reload()
 				}
 			}

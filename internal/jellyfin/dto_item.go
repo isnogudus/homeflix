@@ -1,6 +1,7 @@
 package jellyfin
 
 import (
+	"strconv"
 	"strings"
 	"time"
 
@@ -41,6 +42,8 @@ type BaseItemDto struct {
 	CommunityRating         *float64                     `json:"CommunityRating,omitempty"`
 	OfficialRating          string                       `json:"OfficialRating,omitempty"`
 	PremiereDate            *time.Time                   `json:"PremiereDate,omitempty"`
+	EndDate                 *time.Time                   `json:"EndDate,omitempty"`
+	ProductionLocations     []string                     `json:"ProductionLocations,omitempty"`
 	LocalTrailerCount       int                          `json:"LocalTrailerCount"`
 	UserData                UserItemDataDto              `json:"UserData"`
 	ChildCount              *int                         `json:"ChildCount,omitempty"`
@@ -74,10 +77,11 @@ type NameIDPair struct {
 
 // PersonDto is a member of cast or crew.
 type PersonDto struct {
-	Name string `json:"Name"`
-	ID   string `json:"Id"`
-	Role string `json:"Role,omitempty"`
-	Type string `json:"Type"`
+	Name            string `json:"Name"`
+	ID              string `json:"Id"`
+	Role            string `json:"Role,omitempty"`
+	Type            string `json:"Type"`
+	PrimaryImageTag string `json:"PrimaryImageTag,omitempty"`
 }
 
 // ExternalURL is a link shown by clients; the server never fetches it.
@@ -389,8 +393,9 @@ func (s *Server) baseDto(m *catalog.Movie, id string) BaseItemDto {
 	return d
 }
 
-// describeMeta adds what TMDB knows; fields gates the larger parts.
-func describeMeta(d *BaseItemDto, m *catalog.Movie, fields fieldSet) {
+// describeMeta adds what TMDB knows; fields gates the larger parts. The
+// snapshot provides the portraits of the people.
+func describeMeta(d *BaseItemDto, m *catalog.Movie, fields fieldSet, snap *catalog.Snapshot) {
 	meta := m.Meta
 	if meta == nil {
 		return
@@ -412,7 +417,11 @@ func describeMeta(d *BaseItemDto, m *catalog.Movie, fields fieldSet) {
 	}
 	if fields.has("People") {
 		for _, p := range meta.People {
-			d.People = append(d.People, PersonDto{Name: p.Name, ID: catalog.PersonID(p.ID), Role: p.Role, Type: p.Type})
+			dto := PersonDto{Name: p.Name, ID: catalog.PersonID(p.ID), Role: p.Role, Type: p.Type}
+			if f, ok := snap.Person(dto.ID); ok {
+				dto.PrimaryImageTag = images.PhotoTag(f)
+			}
+			d.People = append(d.People, dto)
 		}
 	}
 	if fields.has("Studios") {
@@ -447,7 +456,7 @@ func describeFile(d *BaseItemDto, info media.Info) {
 // for single-item requests. user holds the requesting user's state.
 func (s *Server) itemDto(m *catalog.Movie, fields fieldSet, sess *Session, user map[string]store.UserData) BaseItemDto {
 	d := s.baseDto(m, m.ID)
-	describeMeta(&d, m, fields)
+	describeMeta(&d, m, fields, s.Catalog.Snapshot())
 	d.UserData = userDataDto(m.ID, user[m.ID], runtimeOf(m))
 	for _, x := range m.Extras {
 		if x.ExtraType == "Trailer" {
@@ -491,7 +500,7 @@ func (s *Server) partDto(r catalog.PartRef, fields fieldSet, sess *Session, user
 	part := r.Part()
 	id := part.File.ID
 	d := s.baseDto(r.Movie, id)
-	describeMeta(&d, r.Movie, fields)
+	describeMeta(&d, r.Movie, fields, s.Catalog.Snapshot())
 	d.Name = r.Movie.Name() + " – " + s.Catalog.Locale.PartName(r.Index+1)
 	d.UserData = userDataDto(id, user[id], part.Info.Duration)
 	describeFile(&d, part.Info)
@@ -511,10 +520,11 @@ func (s *Server) partDto(r catalog.PartRef, fields fieldSet, sess *Session, user
 	return d
 }
 
-// facetDto describes a genre, person or studio as an item of its own.
-func (s *Server) facetDto(f *catalog.Facet, typ string) BaseItemDto {
+// facetDto describes a genre, person or studio as an item of its own;
+// fields gates the biography of a person.
+func (s *Server) facetDto(f *catalog.Facet, typ string, fields fieldSet) BaseItemDto {
 	n := f.Movies
-	return BaseItemDto{
+	d := BaseItemDto{
 		Name:              f.Name,
 		ServerID:          s.ServerID,
 		ID:                f.ID,
@@ -538,6 +548,38 @@ func (s *Server) facetDto(f *catalog.Facet, typ string) BaseItemDto {
 		MediaType:         "Unknown",
 		RemoteTrailers:    []any{},
 		PlayAccess:        "Full",
+	}
+	if f.Person != nil {
+		describePerson(&d, f, fields)
+	}
+	return d
+}
+
+// describePerson adds what TMDB knows about a person.
+func describePerson(d *BaseItemDto, f *catalog.Facet, fields fieldSet) {
+	p := f.Person
+	if fields.has("Overview") {
+		d.Overview = p.Biography
+	}
+	if t := p.Born(); !t.IsZero() {
+		d.PremiereDate = &t
+		d.ProductionYear = t.Year()
+	}
+	if t := p.Died(); !t.IsZero() {
+		d.EndDate = &t
+	}
+	if p.PlaceOfBirth != "" {
+		d.ProductionLocations = []string{p.PlaceOfBirth}
+	}
+	d.ProviderIDs["Tmdb"] = strconv.Itoa(f.TMDbID)
+	d.ExternalUrls = append(d.ExternalUrls, ExternalURL{Name: "TMDB", URL: "https://www.themoviedb.org/person/" + strconv.Itoa(f.TMDbID)})
+	if p.IMDbID != "" {
+		d.ProviderIDs["Imdb"] = p.IMDbID
+		d.ExternalUrls = append(d.ExternalUrls, ExternalURL{Name: "IMDb", URL: "https://www.imdb.com/name/" + p.IMDbID})
+	}
+	if tag := images.PhotoTag(f); tag != "" {
+		d.ImageTags[string(images.Primary)] = tag
+		d.PrimaryImageAspectRatio = images.PosterAspect
 	}
 }
 

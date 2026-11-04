@@ -329,6 +329,50 @@ func certificationName(country, cert string) string {
 	return cert
 }
 
+// PersonDetails is what homeflix keeps about a member of cast or crew.
+type PersonDetails struct {
+	ID           int    `json:"id"`
+	Name         string `json:"name"`
+	Biography    string `json:"biography,omitempty"`
+	Birthday     string `json:"birthday,omitempty"`
+	Deathday     string `json:"deathday,omitempty"`
+	PlaceOfBirth string `json:"place_of_birth,omitempty"`
+	IMDbID       string `json:"imdb_id,omitempty"`
+	ProfilePath  string `json:"profile_path,omitempty"`
+}
+
+// Person fetches the details of a person in language ("de-DE"). Without a
+// biography in that language, the English one is taken; it comes with the
+// same request.
+func (c *Client) Person(ctx context.Context, id int, language string) (PersonDetails, error) {
+	var r struct {
+		PersonDetails
+		Translations struct {
+			Translations []struct {
+				Language string `json:"iso_639_1"`
+				Data     struct {
+					Biography string `json:"biography"`
+				} `json:"data"`
+			} `json:"translations"`
+		} `json:"translations"`
+	}
+	q := url.Values{"language": {language}, "append_to_response": {"translations"}}
+	if err := c.api(ctx, "/person/"+strconv.Itoa(id), q, &r); err != nil {
+		return PersonDetails{}, err
+	}
+	p := r.PersonDetails
+	p.Biography = strings.TrimSpace(p.Biography)
+	if p.Biography == "" {
+		for _, t := range r.Translations.Translations {
+			if t.Language == "en" {
+				p.Biography = strings.TrimSpace(t.Data.Biography)
+				break
+			}
+		}
+	}
+	return p, nil
+}
+
 // Image fetches an image in a TMDB size such as "w780" or "original".
 func (c *Client) Image(ctx context.Context, path, size string) ([]byte, error) {
 	base := c.ImageBase

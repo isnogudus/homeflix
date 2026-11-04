@@ -2,6 +2,7 @@ package images
 
 import (
 	"context"
+	"errors"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -170,7 +171,7 @@ func TestWarmRemovesUnusedImages(t *testing.T) {
 		os.WriteFile(filepath.Join(dir, p), []byte("old"), 0o644)
 	}
 	m := testMovie(true).Parent
-	s.Warm(context.Background(), []*catalog.Movie{m})
+	s.Warm(context.Background(), []*catalog.Movie{m}, nil)
 	if runs() != 2 {
 		t.Errorf("ffmpeg ran %d times, want 2 (movie and extra)", runs())
 	}
@@ -182,7 +183,7 @@ func TestWarmRemovesUnusedImages(t *testing.T) {
 	if _, err := os.Stat(s.stillPath(stillTag(m))); err != nil {
 		t.Error("current still missing")
 	}
-	s.Warm(context.Background(), []*catalog.Movie{m})
+	s.Warm(context.Background(), []*catalog.Movie{m}, nil)
 	if runs() != 2 {
 		t.Error("second warm-up extracted again")
 	}
@@ -240,5 +241,33 @@ func TestArtworkFromTMDBNeedsNoFFmpeg(t *testing.T) {
 	}
 	if _, err := s.Get(context.Background(), m, Backdrop, Size{}); err == nil {
 		t.Error("backdrop without artwork and without ffmpeg succeeded")
+	}
+}
+
+func TestPhotoSurvivesWarm(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "9273-profile-a.jpg")
+	if err := writeJPEG(src, image.NewRGBA(image.Rect(0, 0, 420, 632)), 90); err != nil {
+		t.Fatal(err)
+	}
+	person := &catalog.Facet{Name: "Amy Adams", TMDbID: 9273, Person: &catalog.PersonInfo{PhotoFile: src}}
+	s := &Service{FFmpeg: "/nonexistent/ffmpeg", Dir: filepath.Join(dir, "cache"), Workers: 1}
+	p, err := s.Photo(person, Size{MaxHeight: 316})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if img, _ := decodeFile(p); img.Bounds().Dx() != 210 || img.Bounds().Dy() != 316 {
+		t.Errorf("photo %v, want 210x316", img.Bounds())
+	}
+	s.Warm(context.Background(), nil, []*catalog.Facet{person})
+	if _, err := os.Stat(p); err != nil {
+		t.Errorf("scaled photo of a listed person removed: %v", err)
+	}
+	s.Warm(context.Background(), nil, nil)
+	if _, err := os.Stat(p); !os.IsNotExist(err) {
+		t.Errorf("scaled photo of a forgotten person kept: %v", err)
+	}
+	if _, err := s.Photo(&catalog.Facet{Name: "No Photo"}, Size{}); !errors.Is(err, ErrNoImage) {
+		t.Errorf("person without photo: %v", err)
 	}
 }

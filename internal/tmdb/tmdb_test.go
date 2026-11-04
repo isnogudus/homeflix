@@ -31,6 +31,16 @@ const arrivalDE = `{
   ]}
 }`
 
+const amyAdams = `{
+  "id": 9273, "name": "Amy Adams", "biography": "", "birthday": "1974-08-20", "deathday": null,
+  "place_of_birth": "Vicenza, Veneto, Italy", "imdb_id": "nm0010736", "profile_path": "/amy.jpg",
+  "known_for_department": "Acting",
+  "translations": {"translations": [
+    {"iso_639_1": "fr", "data": {"biography": "Amy Lou Adams est une actrice ..."}},
+    {"iso_639_1": "en", "data": {"biography": " Amy Lou Adams is an American actress ... "}}
+  ]}
+}`
+
 type fakeTMDB struct {
 	*httptest.Server
 	requests  atomic.Int32
@@ -63,6 +73,9 @@ func newFake(t *testing.T) (*fakeTMDB, *Client) {
 			w.Write([]byte(`{"results":[]}`))
 		case r.URL.Path == "/3/movie/329865" && q.Get("append_to_response") == "credits,release_dates":
 			w.Write([]byte(arrivalDE))
+		case r.URL.Path == "/3/person/9273" && q.Get("append_to_response") == "translations":
+			// No German biography: the English one comes in the translations.
+			w.Write([]byte(amyAdams))
 		case r.URL.Path == "/t/p/w780/de-poster.jpg":
 			w.Write([]byte("JPEG"))
 		default:
@@ -141,5 +154,21 @@ func TestUnauthorized(t *testing.T) {
 	c := &Client{HTTP: srv.Client(), Token: "bad", APIBase: srv.URL}
 	if _, err := c.FindByIMDb(context.Background(), "tt1"); err == nil || !strings.Contains(err.Error(), "Token") {
 		t.Errorf("err %v", err)
+	}
+}
+
+func TestPerson(t *testing.T) {
+	_, c := newFake(t)
+	p, err := c.Person(context.Background(), 9273, "de-DE")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := PersonDetails{ID: 9273, Name: "Amy Adams", Biography: "Amy Lou Adams is an American actress ...",
+		Birthday: "1974-08-20", PlaceOfBirth: "Vicenza, Veneto, Italy", IMDbID: "nm0010736", ProfilePath: "/amy.jpg"}
+	if p != want {
+		t.Errorf("person:\n got %+v\nwant %+v", p, want)
+	}
+	if _, err := c.Person(context.Background(), 1, "de-DE"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("unknown person: %v", err)
 	}
 }

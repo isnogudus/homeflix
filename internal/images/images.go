@@ -334,6 +334,30 @@ func (s *Service) Get(ctx context.Context, m *catalog.Movie, kind Kind, size Siz
 		}
 		src, poster = still, kind == Primary && !m.IsExtra()
 	}
+	return s.scaled(src, Tag(m, kind), poster, size)
+}
+
+// PhotoTag identifies the portrait of a person, "" if there is none.
+func PhotoTag(f *catalog.Facet) string {
+	if f.Person == nil || f.Person.PhotoFile == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte("tmdb|" + filepath.Base(f.Person.PhotoFile) + "|Person"))
+	return hex.EncodeToString(sum[:8])
+}
+
+// Photo returns a JPEG file of a person's portrait, scaled as needed.
+func (s *Service) Photo(f *catalog.Facet, size Size) (string, error) {
+	tag := PhotoTag(f)
+	if tag == "" {
+		return "", ErrNoImage
+	}
+	return s.scaled(f.Person.PhotoFile, tag, false, size)
+}
+
+// scaled returns src scaled to size, cut to the poster shape if poster is
+// set, from the cache of tag if it was made before.
+func (s *Service) scaled(src, tag string, poster bool, size Size) (string, error) {
 	q := size.Quality
 	if q <= 0 || q > 100 {
 		q = 90
@@ -341,7 +365,7 @@ func (s *Service) Get(ctx context.Context, m *catalog.Movie, kind Kind, size Siz
 	variant := fmt.Sprintf("%t-%d-%d-%d-%d-%d-%d-%d", poster, size.MaxWidth, size.MaxHeight,
 		size.Width, size.Height, size.FillWidth, size.FillHeight, q)
 	sum := sha256.Sum256([]byte(variant))
-	path := filepath.Join(s.Dir, "scaled", Tag(m, kind), hex.EncodeToString(sum[:12])+".jpg")
+	path := filepath.Join(s.Dir, "scaled", tag, hex.EncodeToString(sum[:12])+".jpg")
 	if _, err := os.Stat(path); err == nil {
 		return path, nil
 	}
@@ -424,11 +448,16 @@ func scale(img image.Image, s Size) image.Image {
 }
 
 // Warm makes the stills of all movies and extras that have none yet, so
-// browsing does not wait for ffmpeg, and removes cached images no movie
-// uses any more. It stops when ctx is done.
-func (s *Service) Warm(ctx context.Context, movies []*catalog.Movie) {
+// browsing does not wait for ffmpeg, and removes cached images no movie or
+// person uses any more. It stops when ctx is done.
+func (s *Service) Warm(ctx context.Context, movies []*catalog.Movie, people []*catalog.Facet) {
 	s.init()
 	wanted := map[string]bool{}
+	for _, f := range people {
+		if t := PhotoTag(f); t != "" {
+			wanted[t] = true
+		}
+	}
 	var todo []*catalog.Movie
 	consider := func(m *catalog.Movie) {
 		for _, k := range []Kind{Primary, Backdrop} {

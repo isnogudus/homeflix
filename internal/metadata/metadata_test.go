@@ -24,12 +24,18 @@ type fakeMovie struct {
 	title, original, date  string
 	overviewDE, overviewEN string
 	imdb                   string
+	cast                   []int // TMDB person IDs
+}
+
+type fakePerson struct {
+	name, bioDE, bioEN, photo string
 }
 
 // fakeTMDB answers find, search, movie and image requests for a few movies.
 type fakeTMDB struct {
 	mu       sync.Mutex
 	movies   []fakeMovie
+	people   map[int]fakePerson
 	requests []string
 	fail     bool
 }
@@ -74,15 +80,34 @@ func (f *fakeTMDB) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if q.Get("language") == "en-US" {
 				overview = m.overviewEN
 			}
+			var cast []map[string]any
+			for _, id := range m.cast {
+				cast = append(cast, map[string]any{"id": id, "name": fmt.Sprint("Person ", id), "character": "Role"})
+			}
 			json.NewEncoder(w).Encode(map[string]any{
 				"id": m.id, "title": m.title, "original_title": m.original, "overview": overview,
 				"release_date": m.date, "imdb_id": m.imdb, "vote_average": 7.0, "vote_count": 10,
 				"poster_path": fmt.Sprintf("/p%d.jpg", m.id), "backdrop_path": fmt.Sprintf("/b%d.jpg", m.id),
-				"genres": []map[string]any{{"id": 18, "name": "Drama"}},
+				"genres":  []map[string]any{{"id": 18, "name": "Drama"}},
+				"credits": map[string]any{"cast": cast},
 			})
 			return
 		}
 		http.NotFound(w, r)
+	case strings.HasPrefix(r.URL.Path, "/3/person/"):
+		var id int
+		fmt.Sscanf(strings.TrimPrefix(r.URL.Path, "/3/person/"), "%d", &id)
+		p, ok := f.people[id]
+		if !ok || q.Get("append_to_response") != "translations" {
+			http.NotFound(w, r)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"id": id, "name": p.name, "biography": p.bioDE, "birthday": "1970-01-02", "profile_path": p.photo,
+			"translations": map[string]any{"translations": []map[string]any{
+				{"iso_639_1": "en", "data": map[string]any{"biography": p.bioEN}},
+			}},
+		})
 	case strings.HasPrefix(r.URL.Path, "/t/p/"):
 		w.Write([]byte("image " + r.URL.Path))
 	default:
@@ -116,13 +141,19 @@ func newFixture(t *testing.T) *fixture {
 	}
 	t.Cleanup(func() { db.Close() })
 	fake := &fakeTMDB{movies: []fakeMovie{
-		{id: 329865, title: "Arrival", original: "Arrival", date: "2016-09-02", overviewDE: "Außerirdische landen.", imdb: "tt2543164"},
+		{id: 329865, title: "Arrival", original: "Arrival", date: "2016-09-02", overviewDE: "Außerirdische landen.", imdb: "tt2543164",
+			cast: []int{9273, 555, 777}},
 		{id: 70160, title: "Die Tribute von Panem - The Hunger Games", original: "The Hunger Games", date: "2012-03-12", overviewEN: "Every year ..."},
 		{id: 687163, title: "Der Astronaut – Project Hail Mary", original: "Project Hail Mary", date: "2026-03-20", overviewDE: "Ein Lehrer im All."},
 		{id: 11, title: "Heat", original: "Heat", date: "1996-02-15", overviewDE: "Cops and robbers."},
 		{id: 99, title: "Delete Deleite", original: "Delete Deleite", date: "2013-05-01"},
 		{id: 12, title: "Rush", original: "Rush", date: "2013-09-02", imdb: "tt1979320"},
 	}}
+	fake.people = map[int]fakePerson{
+		9273: {name: "Amy Adams", bioEN: "An American actress.", photo: "/amy.jpg"},
+		555:  {name: "Ohne Foto", bioDE: "Ein Nebendarsteller."},
+		// 777 is unknown to TMDB.
+	}
 	srv := httptest.NewServer(fake)
 	t.Cleanup(srv.Close)
 	f := &fixture{t: t, store: db, fake: fake, now: time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)}
@@ -339,5 +370,60 @@ func TestRemoveUnusedArtwork(t *testing.T) {
 	}
 	if n, err := RemoveUnusedArtwork(context.Background(), f.store, filepath.Join(dir, "absent"), nil); n != 0 || err != nil {
 		t.Errorf("missing directory: %d, %v", n, err)
+	}
+}
+
+func TestPeople(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	f.add("arrival", "Arrival", 2016, "tt2543164")
+	rep := f.update()
+	if rep.Matched != 1 || rep.People != 2 || rep.PeopleNotFound != 1 || rep.PeopleFailed != 0 || !rep.Changed() {
+		t.Fatalf("report %+v", rep)
+	}
+	people, _ := f.store.AllPeople(ctx)
+	amy := people[9273]
+	var d tmdb.PersonDetails
+	json.Unmarshal([]byte(amy.Data), &d)
+	if amy.Status != store.MetaMatched || amy.Photo != "9273-profile-amy.jpg" || d.Biography != "An American actress." ||
+		d.Birthday != "1970-01-02" {
+		t.Errorf("Amy Adams: %+v %+v", amy, d)
+	}
+	if b, err := os.ReadFile(filepath.Join(f.svc.Dir, amy.Photo)); err != nil || string(b) != "image /t/p/h632/amy.jpg" {
+		t.Errorf("photo: %q, %v", b, err)
+	}
+	if p := people[555]; p.Status != store.MetaMatched || p.Photo != "" || !strings.Contains(p.Data, "Ein Nebendarsteller.") {
+		t.Errorf("person without photo: %+v", p)
+	}
+	if p := people[777]; p.Status != store.MetaNotFound {
+		t.Errorf("unknown person: %+v", p)
+	}
+
+	// Looked up once: the next update sends nothing.
+	f.fake.take()
+	if rep := f.update(); rep.Changed() {
+		t.Errorf("second update: %+v", rep)
+	}
+	if r := f.fake.take(); len(r) != 0 {
+		t.Errorf("second update sent %v", r)
+	}
+	// A photo removed from the cache is fetched again.
+	os.Remove(filepath.Join(f.svc.Dir, amy.Photo))
+	if rep := f.update(); rep.People != 1 {
+		t.Errorf("after removing the photo: %+v", rep)
+	}
+	if n, _ := RemoveUnusedArtwork(ctx, f.store, f.svc.Dir, nil); n != 0 {
+		t.Errorf("removed %d files still in use", n)
+	}
+
+	// Without the movie nobody lists them: they and the photo go.
+	f.store.ApplyScan(ctx, store.ScanChanges{DeletedItemIDs: []string{"arrival"}})
+	f.update()
+	if people, _ := f.store.AllPeople(ctx); len(people) != 0 {
+		t.Errorf("people of a deleted movie kept: %+v", people)
+	}
+	RemoveUnusedArtwork(ctx, f.store, f.svc.Dir, nil)
+	if _, err := os.Stat(filepath.Join(f.svc.Dir, amy.Photo)); !os.IsNotExist(err) {
+		t.Errorf("photo of a forgotten person kept: %v", err)
 	}
 }

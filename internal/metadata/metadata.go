@@ -11,6 +11,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -32,6 +33,7 @@ const (
 const (
 	posterSize   = "w780"
 	backdropSize = "w1280"
+	profileSize  = "h632"
 )
 
 // ErrUpdateRunning is returned when another update holds the lock.
@@ -56,10 +58,16 @@ type Service struct {
 	mu sync.Mutex
 }
 
-// Report counts what an update did.
+// Report counts what an update did: movies, then the people they list.
 type Report struct {
 	Matched, NotFound, Failed, Unchanged int
+	People, PeopleNotFound, PeopleFailed int
 	Took                                 time.Duration
+}
+
+// Changed reports whether the update stored anything new.
+func (r Report) Changed() bool {
+	return r.Matched+r.NotFound+r.Failed+r.People+r.PeopleNotFound+r.PeopleFailed > 0
 }
 
 func (s *Service) now() time.Time {
@@ -100,7 +108,8 @@ func (s *Service) needsUpdate(it store.Item, md store.Metadata, ok bool) bool {
 	return false
 }
 
-// Update looks up every movie that has no current metadata.
+// Update looks up every movie that has no current metadata, then every
+// person those movies list who has not been looked up yet.
 func (s *Service) Update(ctx context.Context) (Report, error) {
 	if !s.mu.TryLock() {
 		return Report{}, ErrUpdateRunning
@@ -117,16 +126,73 @@ func (s *Service) Update(ctx context.Context) (Report, error) {
 		defer unlock()
 	}
 	start := s.now()
+	var rep Report
+	err := s.updateMovies(ctx, &rep)
+	if err == nil && ctx.Err() == nil {
+		err = s.updatePeople(ctx, &rep)
+	}
+	rep.Took = s.now().Sub(start)
+	if err != nil {
+		return rep, err
+	}
+	return rep, ctx.Err()
+}
+
+// parallel calls do for 0 to n-1 on s.Workers goroutines until ctx is done.
+func (s *Service) parallel(ctx context.Context, n int, do func(i int)) {
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	for range max(1, s.Workers) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range jobs {
+				do(i)
+			}
+		}()
+	}
+feed:
+	for i := range n {
+		select {
+		case jobs <- i:
+		case <-ctx.Done():
+			break feed
+		}
+	}
+	close(jobs)
+	wg.Wait()
+}
+
+// progress reports every minute how far an update got and lets the
+// catalog show what is there so far.
+type progress struct {
+	s     *Service
+	what  string
+	total int
+	last  time.Time
+}
+
+func (p *progress) step(done int) {
+	if p.s.Progress == nil || p.s.now().Sub(p.last) < time.Minute {
+		return
+	}
+	p.last = p.s.now()
+	if p.s.Log != nil {
+		p.s.Log.Info("fetching "+p.what, "done", done, "of", p.total)
+	}
+	p.s.Progress()
+}
+
+func (s *Service) updateMovies(ctx context.Context, rep *Report) error {
 	movies, err := s.Store.Movies(ctx)
 	if err != nil {
-		return Report{}, err
+		return err
 	}
 	all, err := s.Store.AllMetadata(ctx)
 	if err != nil {
-		return Report{}, err
+		return err
 	}
 	var todo []store.Item
-	var rep Report
 	for _, it := range movies {
 		md, ok := all[it.ID]
 		if s.needsUpdate(it, md, ok) {
@@ -136,77 +202,179 @@ func (s *Service) Update(ctx context.Context) (Report, error) {
 		}
 	}
 	if len(todo) == 0 {
-		return rep, nil
+		return nil
 	}
 	if s.Log != nil {
 		s.Log.Info("fetching metadata", "movies", len(todo))
 	}
-	workers := max(1, s.Workers)
-	jobs := make(chan store.Item)
 	var mu sync.Mutex
-	var wg sync.WaitGroup
 	var firstErr error
-	lastProgress := s.now()
-	for range workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for it := range jobs {
-				md, ok := all[it.ID]
-				var prev *store.Metadata
-				if ok {
-					prev = &md
-				}
-				res, err := s.lookup(ctx, it, prev)
-				if ctx.Err() != nil {
-					return
-				}
-				mu.Lock()
-				switch {
-				case err != nil:
-					if firstErr == nil {
-						firstErr = err
-					}
-				case res.Status == store.MetaMatched:
-					rep.Matched++
-				case res.Status == store.MetaNotFound:
-					rep.NotFound++
-					if s.Log != nil {
-						s.Log.Info("no metadata found", "title", it.Title, "year", it.Year)
-					}
-				default:
-					rep.Failed++
-					if s.Log != nil {
-						s.Log.Warn("metadata lookup failed", "title", it.Title, "err", res.Error)
-					}
-				}
-				if s.Progress != nil && s.now().Sub(lastProgress) >= time.Minute {
-					lastProgress = s.now()
-					done := rep.Matched + rep.NotFound + rep.Failed
-					if s.Log != nil {
-						s.Log.Info("fetching metadata", "done", done, "of", len(todo))
-					}
-					s.Progress()
-				}
-				mu.Unlock()
+	prog := progress{s: s, what: "metadata", total: len(todo), last: s.now()}
+	s.parallel(ctx, len(todo), func(i int) {
+		it := todo[i]
+		md, ok := all[it.ID]
+		var prev *store.Metadata
+		if ok {
+			prev = &md
+		}
+		res, err := s.lookup(ctx, it, prev)
+		if ctx.Err() != nil {
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case err != nil:
+			if firstErr == nil {
+				firstErr = err
 			}
-		}()
-	}
-feed:
-	for _, it := range todo {
-		select {
-		case jobs <- it:
-		case <-ctx.Done():
-			break feed
+		case res.Status == store.MetaMatched:
+			rep.Matched++
+		case res.Status == store.MetaNotFound:
+			rep.NotFound++
+			if s.Log != nil {
+				s.Log.Info("no metadata found", "title", it.Title, "year", it.Year)
+			}
+		default:
+			rep.Failed++
+			if s.Log != nil {
+				s.Log.Warn("metadata lookup failed", "title", it.Title, "err", res.Error)
+			}
+		}
+		prog.step(rep.Matched + rep.NotFound + rep.Failed)
+	})
+	return firstErr
+}
+
+// peopleOf returns the TMDB IDs of everyone matched movies list.
+func peopleOf(all map[string]store.Metadata) map[int]bool {
+	ids := map[int]bool{}
+	for _, md := range all {
+		if md.Status != store.MetaMatched || md.Data == "" {
+			continue
+		}
+		var m struct {
+			People []struct {
+				ID int `json:"id"`
+			} `json:"people"`
+		}
+		if json.Unmarshal([]byte(md.Data), &m) != nil {
+			continue
+		}
+		for _, p := range m.People {
+			if p.ID > 0 {
+				ids[p.ID] = true
+			}
 		}
 	}
-	close(jobs)
-	wg.Wait()
-	rep.Took = s.now().Sub(start)
-	if firstErr != nil {
-		return rep, firstErr
+	return ids
+}
+
+// needsPersonUpdate reports whether a person has to be looked up.
+func (s *Service) needsPersonUpdate(p store.Person, ok bool) bool {
+	switch {
+	case !ok:
+		return true
+	case p.Status == store.MetaError:
+		return s.now().Sub(p.FetchedAt) >= retryErrors
+	case p.Status == store.MetaNotFound:
+		return s.now().Sub(p.FetchedAt) >= retryNotFound
+	case p.Photo != "":
+		// A photo removed from the cache is fetched again.
+		_, err := os.Stat(filepath.Join(s.Dir, p.Photo))
+		return err != nil
 	}
-	return rep, ctx.Err()
+	return false
+}
+
+// updatePeople looks up the people of matched movies and forgets those no
+// movie lists any more.
+func (s *Service) updatePeople(ctx context.Context, rep *Report) error {
+	all, err := s.Store.AllMetadata(ctx)
+	if err != nil {
+		return err
+	}
+	wanted := peopleOf(all)
+	have, err := s.Store.AllPeople(ctx)
+	if err != nil {
+		return err
+	}
+	var gone, todo []int
+	for id := range have {
+		if !wanted[id] {
+			gone = append(gone, id)
+		}
+	}
+	for id := range wanted {
+		if p, ok := have[id]; s.needsPersonUpdate(p, ok) {
+			todo = append(todo, id)
+		}
+	}
+	if err := s.Store.DeletePeople(ctx, gone); err != nil {
+		return err
+	}
+	if len(todo) == 0 {
+		return nil
+	}
+	sort.Ints(todo)
+	if s.Log != nil {
+		s.Log.Info("fetching people", "count", len(todo))
+	}
+	var mu sync.Mutex
+	var firstErr error
+	prog := progress{s: s, what: "people", total: len(todo), last: s.now()}
+	s.parallel(ctx, len(todo), func(i int) {
+		p, err := s.lookupPerson(ctx, todo[i])
+		if ctx.Err() != nil {
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case err != nil:
+			if firstErr == nil {
+				firstErr = err
+			}
+		case p.Status == store.MetaMatched:
+			rep.People++
+		case p.Status == store.MetaNotFound:
+			rep.PeopleNotFound++
+		default:
+			rep.PeopleFailed++
+			if s.Log != nil {
+				s.Log.Warn("person lookup failed", "tmdb_id", p.TMDbID, "err", p.Error)
+			}
+		}
+		prog.step(rep.People + rep.PeopleNotFound + rep.PeopleFailed)
+	})
+	return firstErr
+}
+
+// lookupPerson fetches the details and photo of a person and stores them.
+// As in lookup, problems with TMDB end up in the stored state.
+func (s *Service) lookupPerson(ctx context.Context, id int) (store.Person, error) {
+	p := store.Person{TMDbID: id, FetchedAt: s.now()}
+	d, err := s.TMDB.Person(ctx, id, s.Language)
+	if errors.Is(err, tmdb.ErrNotFound) {
+		p.Status = store.MetaNotFound
+		return p, s.Store.SavePerson(ctx, p)
+	}
+	if err == nil {
+		p.Photo, err = s.image(ctx, id, "profile", d.ProfilePath, profileSize)
+	}
+	var data []byte
+	if err == nil {
+		data, err = json.Marshal(d)
+	}
+	if err != nil {
+		if ctx.Err() != nil {
+			return p, nil
+		}
+		p.Status, p.Error, p.Photo = store.MetaError, err.Error(), ""
+		return p, s.Store.SavePerson(ctx, p)
+	}
+	p.Status, p.Data = store.MetaMatched, string(data)
+	return p, s.Store.SavePerson(ctx, p)
 }
 
 // lookup matches one movie, fetches its details and artwork and stores the
@@ -457,9 +625,16 @@ func RemoveUnusedArtwork(ctx context.Context, st *store.Store, dir string, log *
 	if err != nil {
 		return 0, err
 	}
+	people, err := st.AllPeople(ctx)
+	if err != nil {
+		return 0, err
+	}
 	used := map[string]bool{}
 	for _, md := range all {
 		used[md.Poster], used[md.Backdrop] = true, true
+	}
+	for _, p := range people {
+		used[p.Photo] = true
 	}
 	removed := 0
 	for _, de := range des {

@@ -192,8 +192,11 @@ and backdrops are then cut from stills of the videos.
 With it, homeflix sends TMDB the IMDb ID from a file name, or the title
 and year, once per movie, fetches the details and two images, and keeps
 them in the data directory.
-A movie is looked up again only when its file name changes; one that was
-not found is retried after 30 days.
+Then it fetches, once per person, the biography, dates and place of birth
+and death, and portrait of the directors, writers and first 20 actors of
+each movie, asking TMDB by its own ID of the person.
+A movie is looked up again only when its file name changes; a movie or
+person that was not found is retried after 30 days.
 The block holds:
 .Bl -tag -width Ds
 .It Ic token file Ar path

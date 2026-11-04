@@ -126,8 +126,12 @@ tmdb { token file "/usr/local/etc/homeflix-tmdb.token" }
 The file holds the API Read Access Token (v4) of a free TMDB account and
 must not be readable by others. homeflix then sends TMDB, once per movie,
 the IMDb ID from the file name or the title and year, fetches the details
-and two images and keeps them in the data directory; nothing else leaves
-the host. All network access goes through `internal/outbound`, which only
+and two images and keeps them in the data directory. Then it fetches, once
+per person, biography, dates and portrait of the directors, writers and
+first 20 actors, asking by TMDB's own person IDs. Nothing else leaves the
+host. The first run over a large library takes a while: 1,700 movies list
+about 22,000 people, which takes some 70 minutes at ten requests a second
+and about 1 GB for the portraits. All network access goes through `internal/outbound`, which only
 reaches the hosts it was created for; a test fails if any other code opens
 connections.
 
@@ -161,7 +165,7 @@ The data directory holds:
 | Path | Content | Back up? |
 |---|---|---|
 | `homeflix.db` | users, sessions, watch state, library, metadata, manual matches | yes, with `homeflix backup` |
-| `metadata/` | artwork from TMDB | yes; fetching it again needs TMDB |
+| `metadata/` | artwork and portraits from TMDB | yes; fetching it again needs TMDB |
 | `images/` | stills and scaled images made from the videos | no, it is rebuilt on demand |
 | `subtitles/` | text subtitles extracted for clients that ask for them as files | no |
 
