@@ -16,6 +16,7 @@ import (
 
 	"homeflix/internal/catalog"
 	"homeflix/internal/clientaddr"
+	"homeflix/internal/hls"
 	"homeflix/internal/lockout"
 	"homeflix/internal/metadata"
 	"homeflix/internal/outbound"
@@ -59,6 +60,9 @@ type Server struct {
 
 	// For the web client: text subtitles as WebVTT; nil leaves them out.
 	Subtitles *subtitles.Service
+	// HLS remuxes files browsers cannot play as they are; nil plays only
+	// those they can.
+	HLS *hls.Manager
 
 	pages map[string]*template.Template
 }

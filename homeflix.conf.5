@@ -197,6 +197,12 @@ The default is 4.
 .It Ic image workers Ar number
 How many ffmpeg processes take stills in parallel, 1 to 16.
 The default is 2.
+.It Ic transcode workers Ar number
+How many ffmpeg processes convert movies for players at once, 1 to 32.
+Converting means copying the video and turning the audio into AAC for
+browsers, which takes little processor time; a further player gets a
+busy answer and tries again.
+The default is 4.
 .It Ic scan interval Ar duration
 The time between automatic scans of the libraries, from 1 minute to
 30 days.

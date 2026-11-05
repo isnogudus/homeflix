@@ -1,0 +1,7 @@
+homeflix includes third-party software:
+
+hls.js 1.7.3 (internal/web/static/hls-1.7.3.light.min.js)
+Copyright (c) 2017 Dailymotion (http://www.dailymotion.com)
+Licensed under the Apache License, Version 2.0; see
+internal/web/static/hls.js-LICENSE.txt.
+https://github.com/video-dev/hls.js

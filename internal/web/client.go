@@ -32,6 +32,8 @@ func (s *Server) registerClient(mux *http.ServeMux) {
 	mux.HandleFunc("GET /web/stream/{file}", s.signedIn(s.stream))
 	mux.HandleFunc("GET /web/subtitles/{file}/{index}", s.signedIn(s.subtitleTrack))
 	mux.HandleFunc("POST /web/progress", s.signedIn(s.progress))
+	mux.HandleFunc("GET /web/hls/{file}/{audio}/index.m3u8", s.signedIn(s.hlsPlaylist))
+	mux.HandleFunc("GET /web/hls/{file}/{audio}/{segment}", s.signedIn(s.hlsSegment))
 	mux.HandleFunc("GET /web/account", s.signedIn(s.account))
 	mux.HandleFunc("POST /web/account/password", s.signedIn(s.changeOwnPassword))
 	mux.HandleFunc("POST /web/account/sessions/{session}/end", s.signedIn(s.endOwnSession))
@@ -408,11 +410,11 @@ func (s *Server) movie(w http.ResponseWriter, r *http.Request, sess *session) {
 	if a := defaultAudio(info); a != nil {
 		d["PlaysAudio"] = a.DisplayTitle
 	}
-	play := directPlay(version.Parts[0])
-	d["Play"] = play
+	mode, play := s.playable(version.Parts[0])
+	d["Play"], d["Playable"], d["Remux"] = play, mode != "", mode == "hls"
 	ud := user[m.ID]
 	d["Played"], d["Favorite"] = ud.Played, ud.IsFavorite
-	if play.OK {
+	if mode != "" {
 		d["PlayURL"] = playURL(m, version, 0, 0)
 		// A later part may be where the user stopped.
 		for i := len(version.Parts) - 1; i >= 0; i-- {
@@ -563,9 +565,18 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request, sess *session) {
 type playerPart struct {
 	Item     string        `json:"item"`   // the ID play state is kept under
 	Source   string        `json:"source"` // the version
-	Src      string        `json:"src"`
+	Direct   string        `json:"direct"` // the file itself, "" if browsers cannot play it
+	HLS      string        `json:"hls"`    // remux playlists below it: <hls><audio>/index.m3u8; "" if none
 	Duration float64       `json:"duration"`
+	Audio    []playerAudio `json:"audio"`
 	Tracks   []playerTrack `json:"tracks"`
+}
+
+// playerAudio is an audio track the player offers.
+type playerAudio struct {
+	Index   int    `json:"index"`
+	Label   string `json:"label"`
+	Default bool   `json:"default"` // what the file plays without a choice
 }
 
 type playerTrack struct {
@@ -589,8 +600,8 @@ func (s *Server) play(w http.ResponseWriter, r *http.Request, sess *session) {
 	}
 	d := s.clientData(r, sess, "")
 	d["Name"], d["Back"] = m.Name(), "/web/movies/"+m.ID
-	if p := directPlay(version.Parts[0]); !p.OK {
-		d["Play"] = p
+	if mode, why := s.playable(version.Parts[0]); mode == "" {
+		d["Play"] = why
 		s.render(w, r, http.StatusOK, "play", sess, d)
 		return
 	}
@@ -600,7 +611,19 @@ func (s *Server) play(w http.ResponseWriter, r *http.Request, sess *session) {
 		if i > 0 {
 			item = p.File.ID
 		}
-		pp := playerPart{Item: item, Source: version.ID, Src: "/web/stream/" + p.File.ID, Duration: p.Info.Duration.Seconds()}
+		pp := playerPart{Item: item, Source: version.ID, Duration: p.Info.Duration.Seconds()}
+		if directPlay(p).OK {
+			pp.Direct = "/web/stream/" + p.File.ID
+		}
+		if s.HLS != nil && remuxable(p).OK {
+			pp.HLS = "/web/hls/" + p.File.ID + "/"
+		}
+		defAudio := p.Info.DefaultAudioIndex()
+		for _, st := range p.Info.Streams {
+			if st.Type == "Audio" {
+				pp.Audio = append(pp.Audio, playerAudio{Index: st.Index, Label: st.DisplayTitle, Default: st.Index == defAudio})
+			}
+		}
 		defSub := p.Info.DefaultSubtitleIndex()
 		for _, st := range p.Info.Streams {
 			if st.Type == "Subtitle" && st.IsTextSubtitleStream {
@@ -614,7 +637,7 @@ func (s *Server) play(w http.ResponseWriter, r *http.Request, sess *session) {
 	part = min(max(part, 0), len(parts)-1)
 	start, _ := strconv.Atoi(r.URL.Query().Get("t"))
 	config, err := json.Marshal(map[string]any{"parts": parts, "part": part, "start": max(start, 0), "csrf": sess.CSRF(),
-		"back": "/web/movies/" + m.ID, "partLabel": s.text("part")})
+		"back": "/web/movies/" + m.ID, "partLabel": s.text("part"), "busy": s.text("remuxBusy")})
 	if err != nil {
 		s.fail(w, err)
 		return

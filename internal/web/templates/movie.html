@@ -18,18 +18,18 @@
 		{{with .Data.Genres}}<p class="tags">{{range .}}<a href="{{.URL}}">{{.Label}}</a>{{end}}</p>{{end}}
 		{{with .Data.Tagline}}<p class="tagline">{{.}}</p>{{end}}
 		<div class="actions">
-			{{if .Data.Play.OK}}
+			{{if .Data.Playable}}
 				{{with .Data.ResumeURL}}<a class="button primary" href="{{.}}">▶ {{t "resume"}} {{$.Data.ResumeAt}}{{with $.Data.ResumePart}} ({{t "part"}} {{.}}){{end}}</a>{{end}}
 				<a class="button{{if not .Data.ResumeURL}} primary{{end}}" href="{{.Data.PlayURL}}">{{if .Data.ResumeURL}}{{t "fromStart"}}{{else}}▶ {{t "play"}}{{end}}</a>
 			{{end}}
 			<form method="post" action="/web/movies/{{.Data.Movie.ID}}/played">{{template "csrf" .}}<input type="hidden" name="played" value="{{if .Data.Played}}off{{else}}on{{end}}"><button>{{if .Data.Played}}{{t "markUnplayed"}}{{else}}{{t "markPlayed"}}{{end}}</button></form>
 			<form method="post" action="/web/movies/{{.Data.Movie.ID}}/favorite">{{template "csrf" .}}<input type="hidden" name="favorite" value="{{if .Data.Favorite}}off{{else}}on{{end}}"><button aria-pressed="{{if .Data.Favorite}}true{{else}}false{{end}}">{{if .Data.Favorite}}♥ {{t "favorite"}}{{else}}♡ {{t "favorite"}}{{end}}</button></form>
 		</div>
-		{{if not .Data.Play.OK}}<p class="flash err">{{t .Data.Play.Reason}} ({{.Data.Play.Detail}})</p>{{end}}
+		{{if not .Data.Playable}}<p class="flash err">{{t .Data.Play.Reason}} ({{.Data.Play.Detail}})</p>{{end}}
 		{{with .Data.Versions}}<nav class="pills" aria-label="{{t "chooseVersion"}}">{{range .}}<a href="{{.URL}}"{{if .Current}} aria-current="page"{{end}}>{{.Label}}{{if gt .Parts 1}} · {{.Parts}} {{t "parts"}}{{end}}</a>{{end}}</nav>{{end}}
 		{{with .Data.Overview}}<p class="overview">{{.}}</p>{{end}}
 		<dl class="tracks">
-			{{with .Data.Audio}}<dt>{{t "audio"}}</dt><dd>{{range $i, $a := .}}{{if $i}}, {{end}}{{$a}}{{end}}{{with $.Data.PlaysAudio}}<br><span class="note">{{t "browserPlays"}}: {{.}}</span>{{end}}</dd>{{end}}
+			{{with .Data.Audio}}<dt>{{t "audio"}}</dt><dd>{{range $i, $a := .}}{{if $i}}, {{end}}{{$a}}{{end}}{{if $.Data.Remux}}<br><span class="note">{{t "remuxNote"}}</span>{{else}}{{with $.Data.PlaysAudio}}<br><span class="note">{{t "browserPlays"}}: {{.}}</span>{{end}}{{end}}</dd>{{end}}
 			{{with .Data.Subtitles}}<dt>{{t "subtitles"}}</dt><dd>{{range $i, $s := .}}{{if $i}}, {{end}}{{$s}}{{end}}</dd>{{end}}
 			{{with .Data.Collection}}<dt>{{t "collection"}}</dt><dd><a href="{{.URL}}">{{.Label}}</a></dd>{{end}}
 		</dl>

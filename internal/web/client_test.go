@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"homeflix/internal/catalog"
+	"homeflix/internal/hls"
 	"homeflix/internal/store"
 	"homeflix/internal/tmdb"
 )
@@ -22,6 +23,7 @@ const (
 	slaveID   = "a2000000000000000000000000000001" // MP4, h264 + AAC: plays in browsers
 	arrivalID = "a2000000000000000000000000000002" // MKV, HEVC + AC3: does not yet
 	splitID   = "a2000000000000000000000000000003" // MP4 in two parts
+	remuxID   = "a2000000000000000000000000000004" // MKV, h264 + AC3: plays remuxed
 	libID     = "11111111111111111111111111111111"
 )
 
@@ -131,7 +133,7 @@ func TestDetailsAndPlayer(t *testing.T) {
 		t.Fatalf("details: %d %s", rec.Code, body)
 	}
 	rec = f.do(lan, "GET", "/web/movies/"+arrivalID, nil, c)
-	if !strings.Contains(rec.Body.String(), "Browser können diesen Container noch nicht öffnen") || strings.Contains(rec.Body.String(), "/web/play/") {
+	if !strings.Contains(rec.Body.String(), "Browser können dieses Video noch nicht abspielen") || strings.Contains(rec.Body.String(), "/web/play/") {
 		t.Errorf("unplayable details: %s", rec.Body.String())
 	}
 	if rec := f.do(lan, "GET", "/web/play/"+arrivalID, nil, c); strings.Contains(rec.Body.String(), "data-config") {
@@ -145,7 +147,9 @@ func TestDetailsAndPlayer(t *testing.T) {
 		t.Fatalf("player config: %v", cfg)
 	}
 	second := parts[1].(map[string]any)
-	if second["item"] != "f4" || second["src"] != "/web/stream/f4" || second["duration"].(float64) < 7000 {
+	audio, _ := second["audio"].([]any)
+	if second["item"] != "f4" || second["direct"] != "/web/stream/f4" || second["hls"] != "" || len(audio) != 3 ||
+		second["duration"].(float64) < 7000 {
 		t.Errorf("second part: %v", second)
 	}
 	if !strings.Contains(rec.Body.String(), `<script src="/web/static/player.js?v=`+assetVersions["player.js"]+`" defer></script>`) {
@@ -256,5 +260,49 @@ func TestCrewAndCast(t *testing.T) {
 	body := f.do(lan, "GET", "/web/movies/"+slaveID, nil, c).Body.String()
 	if strings.Count(body, "Steve McQueen") != 1 || !strings.Contains(body, "Regie, Drehbuch") || !strings.Contains(body, "Solomon Northup") {
 		t.Errorf("people: %s", body)
+	}
+}
+
+func TestRemuxPlayback(t *testing.T) {
+	f, c, _ := clientFixture(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "remux.mkv")
+	os.WriteFile(path, []byte("x"), 0o644)
+	// h264 with AC3 as the default audio, in Matroska: plays only remuxed.
+	probe := strings.Replace(probeFixture(t, "twelve-years"), `"format_name": "mov,mp4,m4a,3gp,3g2,mj2"`, `"format_name": "matroska,webm"`, 1)
+	items := []store.Item{{ID: remuxID, LibraryID: libID, Type: "Movie", Title: "Remux", SortTitle: "remux", Year: 2020,
+		DateCreated: time.Now(), Files: []store.MediaFile{{ID: "f9", ItemID: remuxID, Path: path, Size: 1, Probe: probe}}}}
+	srv := f.server
+	srv.Catalog.Set(catalog.Build([]store.Library{{ID: libID, Name: "Filme", CollectionType: "movies"}}, items, catalog.Options{Locale: "de"}))
+	srv.HLS = &hls.Manager{FFmpeg: "/nonexistent/ffmpeg", Dir: filepath.Join(dir, "hls"), Workers: 1,
+		Keyframes: func(string) ([]time.Duration, error) {
+			return []time.Duration{0, 6 * time.Second, 12 * time.Second}, nil
+		}}
+
+	rec := f.do(lan, "GET", "/web/movies/"+remuxID, nil, c)
+	if !strings.Contains(rec.Body.String(), "/web/play/"+remuxID) || !strings.Contains(rec.Body.String(), "wandelt den Ton") {
+		t.Errorf("details: %s", rec.Body.String())
+	}
+	cfg := playerConfig(t, f.do(lan, "GET", "/web/play/"+remuxID, nil, c).Body.String())
+	part := cfg["parts"].([]any)[0].(map[string]any)
+	if part["direct"] != "" || part["hls"] != "/web/hls/f9/" {
+		t.Errorf("part: %v", part)
+	}
+	rec = f.do(lan, "GET", "/web/hls/f9/1/index.m3u8", nil, c)
+	if rec.Code != 200 || rec.Header().Get("Content-Type") != "application/vnd.apple.mpegurl" ||
+		!strings.Contains(rec.Body.String(), "#EXTINF:6.000000,\n0.ts\n") || !strings.Contains(rec.Body.String(), "2.ts") {
+		t.Errorf("playlist: %d %q", rec.Code, rec.Body.String())
+	}
+	for path, want := range map[string]int{
+		"/web/hls/f9/0/index.m3u8": http.StatusNotFound, // the video, not audio
+		"/web/hls/f9/2/index.m3u8": http.StatusOK,       // another audio track
+		"/web/hls/f9/1/x.ts":       http.StatusNotFound,
+	} {
+		if rec := f.do(lan, "GET", path, nil, c); rec.Code != want {
+			t.Errorf("%s: %d, want %d", path, rec.Code, want)
+		}
+	}
+	if rec := f.do(lan, "GET", "/web/hls/f9/1/index.m3u8", nil, nil); rec.Code != http.StatusFound {
+		t.Errorf("playlist without session: %d", rec.Code)
 	}
 }

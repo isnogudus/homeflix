@@ -2,6 +2,7 @@ package web
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"homeflix/internal/catalog"
+	"homeflix/internal/hls"
 	"homeflix/internal/media"
 	"homeflix/internal/playstate"
 	"homeflix/internal/subtitles"
@@ -49,6 +51,115 @@ func directPlay(p catalog.Part) playability {
 		return playability{Reason: "needsAudio", Detail: strings.ToUpper(a.Codec)}
 	}
 	return playability{OK: true}
+}
+
+// remuxable reports whether the server can make a part playable by
+// copying its video into HLS and converting the audio: h264 in 8 bits, in
+// any container. Other video waits for transcoding.
+func remuxable(p catalog.Part) playability {
+	v, ok := p.Info.Video()
+	switch {
+	case !ok:
+		return playability{Reason: "needsVideo", Detail: "?"}
+	case v.Codec != "h264" || v.BitDepth > 8:
+		detail := v.Codec
+		if v.Profile != "" {
+			detail += " " + v.Profile
+		}
+		return playability{Reason: "needsVideo", Detail: detail}
+	}
+	return playability{OK: true}
+}
+
+// playable says how a part plays in browsers: as it is, remuxed by the
+// server (hls), or not yet.
+func (s *Server) playable(p catalog.Part) (mode string, why playability) {
+	if d := directPlay(p); d.OK {
+		return "direct", d
+	} else if r := remuxable(p); r.OK && s.HLS != nil {
+		return "hls", d
+	} else if !r.OK {
+		return "", r
+	} else {
+		return "", d
+	}
+}
+
+// hlsSource describes the remux of one audio track of a part.
+func hlsSource(p catalog.Part, audio int) hls.Source {
+	return hls.Source{Key: fmt.Sprintf("%s-%d-%d", p.File.ID, p.File.Size, p.File.ModTime.UnixMilli()),
+		Path: p.File.Path, Duration: p.Info.Duration, Audio: audio}
+}
+
+// hlsPart finds the part and audio track of an HLS request.
+func (s *Server) hlsPart(w http.ResponseWriter, r *http.Request) (catalog.PartRef, hls.Source, bool) {
+	if s.Catalog == nil || s.HLS == nil {
+		http.NotFound(w, r)
+		return catalog.PartRef{}, hls.Source{}, false
+	}
+	ref, ok := s.Catalog.Snapshot().Part(r.PathValue("file"))
+	audio, err := strconv.Atoi(r.PathValue("audio"))
+	if !ok || err != nil || !hasAudio(ref.Part().Info, audio) || !remuxable(ref.Part()).OK {
+		http.NotFound(w, r)
+		return catalog.PartRef{}, hls.Source{}, false
+	}
+	return ref, hlsSource(ref.Part(), audio), true
+}
+
+func hasAudio(info media.Info, index int) bool {
+	for _, st := range info.Streams {
+		if st.Index == index && st.Type == "Audio" {
+			return true
+		}
+	}
+	return false
+}
+
+// hlsPlaylist serves the playlist of a remuxed part.
+func (s *Server) hlsPlaylist(w http.ResponseWriter, r *http.Request, sess *session) {
+	ref, src, ok := s.hlsPart(w, r)
+	if !ok {
+		return
+	}
+	segs, err := s.HLS.Segments(src)
+	if err != nil {
+		s.Log.Warn("no segment plan", "item", ref.Movie.Title, "err", err)
+		http.Error(w, "this file cannot be remuxed", http.StatusUnprocessableEntity)
+		return
+	}
+	s.Log.Info("remux playlist", "item", ref.Movie.Title, "part", ref.Index+1, "audio", src.Audio, "user", sess.User.Name)
+	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.Write(hls.Playlist(segs, func(i int) string { return strconv.Itoa(i) + ".ts" }))
+}
+
+// hlsSegment serves a segment, waiting for ffmpeg to make it.
+func (s *Server) hlsSegment(w http.ResponseWriter, r *http.Request, sess *session) {
+	_, src, ok := s.hlsPart(w, r)
+	if !ok {
+		return
+	}
+	n, err := strconv.Atoi(strings.TrimSuffix(r.PathValue("segment"), ".ts"))
+	if err != nil || !strings.HasSuffix(r.PathValue("segment"), ".ts") {
+		http.NotFound(w, r)
+		return
+	}
+	path, err := s.HLS.Segment(r.Context(), src, n)
+	switch {
+	case errors.Is(err, hls.ErrBusy):
+		w.Header().Set("Retry-After", "10")
+		http.Error(w, "the server is busy converting other movies", http.StatusServiceUnavailable)
+		return
+	case err != nil:
+		if r.Context().Err() == nil {
+			s.Log.Warn("remux segment failed", "path", src.Path, "segment", n, "err", err)
+			http.Error(w, "segment not available", http.StatusInternalServerError)
+		}
+		return
+	}
+	w.Header().Set("Content-Type", "video/mp2t")
+	w.Header().Set("Cache-Control", "private, max-age=3600")
+	http.ServeFile(w, r, path)
 }
 
 // defaultAudio is the audio track a browser plays: the one marked default,

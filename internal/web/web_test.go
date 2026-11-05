@@ -48,10 +48,11 @@ func (s sender) origin() string {
 }
 
 type fixture struct {
-	t    *testing.T
-	h    http.Handler
-	db   *store.Store
-	logs *bytes.Buffer
+	t      *testing.T
+	h      http.Handler
+	db     *store.Store
+	logs   *bytes.Buffer
+	server *Server
 }
 
 // newFixture serves the pages; setup, if given, may fill in more of the
@@ -80,7 +81,7 @@ func newFixture(t *testing.T, setup ...func(*Server)) *fixture {
 		f(s)
 	}
 	res := clientaddr.Resolver{Trusted: []netip.Prefix{netip.MustParsePrefix("127.0.0.1/32"), netip.MustParsePrefix("192.168.1.2/32")}}
-	return &fixture{t: t, h: res.Middleware(s.Handler()), db: db, logs: logs}
+	return &fixture{t: t, h: res.Middleware(s.Handler()), db: db, logs: logs, server: s}
 }
 
 // do sends a request; form values make it a POST with the sender's Origin.

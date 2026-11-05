@@ -10,6 +10,7 @@
 			<dt>{{t "people"}}</dt><dd>{{.Data.People}} ({{.Data.PeopleWithDetails}} {{t "peopleDetails"}})</dd>
 			<dt>{{t "users"}}</dt><dd><a href="/admin/users">{{.Data.Users}}</a></dd>
 			<dt>{{t "sessions"}}</dt><dd>{{.Data.Sessions}}</dd>
+			{{with .Data.Remuxing}}<dt>{{t "remuxing"}}</dt><dd>{{.}}</dd>{{end}}
 		</dl>
 	</section>
 	<section class="card">

@@ -52,6 +52,7 @@ ffprobe $tools/ffprobe
 ffmpeg "/usr/local/bin/ffmpeg"
 probe workers 8
 image workers 3
+transcode workers 2
 scan interval 1h30m
 sort articles { The, der die das }
 trusted proxy { 192.168.1.2, 127.0.0.1 }
@@ -67,19 +68,20 @@ library Doku { path ${movies}_doku }
 		t.Fatal(err)
 	}
 	want := Config{
-		ServerName:      "homeflix dev",
-		Listen:          "192.168.1.10:18096",
-		DataDir:         "/etc/data",
-		LogLevel:        "debug",
-		FFprobe:         "/usr/local/bin/ffprobe",
-		FFmpeg:          "/usr/local/bin/ffmpeg",
-		ProbeWorkers:    8,
-		ImageWorkers:    3,
-		ScanInterval:    90 * time.Minute,
-		SortArticles:    []string{"the", "der", "die", "das"},
-		DisplayLanguage: "de",
-		Discovery:       true,
-		TrustedProxies:  []netip.Prefix{netip.MustParsePrefix("192.168.1.2/32"), netip.MustParsePrefix("127.0.0.1/32")},
+		ServerName:       "homeflix dev",
+		Listen:           "192.168.1.10:18096",
+		DataDir:          "/etc/data",
+		LogLevel:         "debug",
+		FFprobe:          "/usr/local/bin/ffprobe",
+		FFmpeg:           "/usr/local/bin/ffmpeg",
+		ProbeWorkers:     8,
+		ImageWorkers:     3,
+		TranscodeWorkers: 2,
+		ScanInterval:     90 * time.Minute,
+		SortArticles:     []string{"the", "der", "die", "das"},
+		DisplayLanguage:  "de",
+		Discovery:        true,
+		TrustedProxies:   []netip.Prefix{netip.MustParsePrefix("192.168.1.2/32"), netip.MustParsePrefix("127.0.0.1/32")},
 		AdminFrom: []netip.Prefix{netip.MustParsePrefix("192.168.1.0/24"), netip.MustParsePrefix("100.64.0.0/10"),
 			netip.MustParsePrefix("fd7a:115c:a1e0::/48")},
 		Libraries: []Library{

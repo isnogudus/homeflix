@@ -1,12 +1,16 @@
 {{define "title"}}{{.Data.Name}}{{end}}
-{{define "scripts"}}{{if .Data.Config}}<script src="{{asset "player.js"}}" defer></script>{{end}}{{end}}
+{{define "scripts"}}{{if .Data.Config}}<script src="{{asset "hls-1.7.3.light.min.js"}}" defer></script>
+<script src="{{asset "player.js"}}" defer></script>{{end}}{{end}}
 {{define "content"}}
 <div class="playerpage">
 	<p class="note"><a href="{{.Data.Back}}">← {{.Data.Name}}</a></p>
 	{{if .Data.Config}}
 	<div id="player" data-config="{{.Data.Config}}">
 		<video controls playsinline preload="metadata"{{with .Data.Poster}} poster="{{.}}"{{end}}></video>
-		<p class="note" id="partinfo" hidden></p>
+		<div class="playerbar">
+			<label id="audiochoice" hidden>{{t "audio"}} <select></select></label>
+			<span class="note" id="partinfo" hidden></span>
+		</div>
 		<p class="flash err" id="playerror" hidden>{{t "playError"}}</p>
 	</div>
 	{{else}}

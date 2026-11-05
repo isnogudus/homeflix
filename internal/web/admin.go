@@ -146,6 +146,9 @@ func (s *Server) adminOverview(w http.ResponseWriter, r *http.Request, sess *ses
 	if s.ScanStatus != nil {
 		d["Scan"] = s.ScanStatus()
 	}
+	if s.HLS != nil {
+		d["Remuxing"] = s.HLS.Sessions()
+	}
 	s.render(w, r, http.StatusOK, "admin", sess, d)
 }
 

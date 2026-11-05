@@ -36,6 +36,9 @@ type Config struct {
 	// processes run in parallel.
 	ProbeWorkers int
 	ImageWorkers int
+	// TranscodeWorkers is the number of ffmpeg processes that remux or
+	// transcode for players at once.
+	TranscodeWorkers int
 	// ScanInterval is the time between automatic library scans; 0 turns
 	// them off. A scan also runs at startup.
 	ScanInterval time.Duration
@@ -95,19 +98,20 @@ func Default() Config {
 		name = "homeflix"
 	}
 	return Config{
-		ServerName:      name,
-		Listen:          net.JoinHostPort("", strconv.Itoa(DefaultPort)),
-		DataDir:         "/var/db/homeflix",
-		LogLevel:        "info",
-		FFprobe:         "ffprobe",
-		FFmpeg:          "ffmpeg",
-		ProbeWorkers:    4,
-		ImageWorkers:    2,
-		ScanInterval:    6 * time.Hour,
-		SortArticles:    []string{"the", "a", "an"},
-		DisplayLanguage: "en",
-		Discovery:       true,
-		AdminFrom:       DefaultAdminFrom(),
+		ServerName:       name,
+		Listen:           net.JoinHostPort("", strconv.Itoa(DefaultPort)),
+		DataDir:          "/var/db/homeflix",
+		LogLevel:         "info",
+		FFprobe:          "ffprobe",
+		FFmpeg:           "ffmpeg",
+		ProbeWorkers:     4,
+		ImageWorkers:     2,
+		TranscodeWorkers: 4,
+		ScanInterval:     6 * time.Hour,
+		SortArticles:     []string{"the", "a", "an"},
+		DisplayLanguage:  "en",
+		Discovery:        true,
+		AdminFrom:        DefaultAdminFrom(),
 	}
 }
 
@@ -126,7 +130,7 @@ func DefaultAdminFrom() []netip.Prefix {
 var keywords = []string{
 	"admin", "articles", "data", "directory", "discovery", "ffmpeg", "ffprobe", "file", "from", "image",
 	"interval", "language", "level", "library", "listen", "log", "name", "no", "on", "path",
-	"port", "probe", "proxy", "refresh", "scan", "server", "sort", "tmdb", "token", "trusted", "workers",
+	"port", "probe", "proxy", "refresh", "scan", "server", "sort", "tmdb", "token", "transcode", "trusted", "workers",
 }
 
 // Load reads the configuration file at path; "-" reads standard input. On
@@ -330,6 +334,8 @@ func (p *parser) statement() bool {
 		return p.once("probe workers", t.Pos) && p.number(&p.cfg.ProbeWorkers, 1, 64)
 	case p.Accept("image", "workers"):
 		return p.once("image workers", t.Pos) && p.number(&p.cfg.ImageWorkers, 1, 16)
+	case p.Accept("transcode", "workers"):
+		return p.once("transcode workers", t.Pos) && p.number(&p.cfg.TranscodeWorkers, 1, 32)
 	case p.Accept("scan", "interval"):
 		if !p.once("scan interval", t.Pos) {
 			return false

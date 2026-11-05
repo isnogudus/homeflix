@@ -167,10 +167,16 @@ grouping into collections; search over movies, people and collections;
 details with cast and crew, versions, audio and subtitle tracks and similar
 movies; collection and person pages; and an account page to change the
 password and sign out devices. The player plays a movie's parts one after
-another and keeps the position in sync with Jellyfin clients. For now it
-plays what browsers decode themselves (h264 with AAC or MP3 in MP4, about
-60 % of a typical library); other files say what is missing until the
-server converts them.
+another and keeps the position in sync with Jellyfin clients, and offers
+the audio tracks of a file. What browsers decode themselves (h264 with AAC
+or MP3 in MP4) plays as it is. Other h264 files, such as MKV with AC3,
+DTS or TrueHD, and other audio tracks, are remuxed on the fly: the video
+is copied, the audio converted to AAC, and the player gets HLS, cut at the
+keyframes read from the container index. ffmpeg runs only while someone
+watches, pauses when it is a minute ahead, and its segments in
+`transcode/` in the data directory are removed as the player moves on.
+Other video (VC-1, MPEG-2, MPEG-4 ASP, HEVC outside Safari) says what is
+missing until the server transcodes it.
 
 The admin UI shows the state of the server and does what the `user` and
 `match` commands do:
@@ -250,4 +256,5 @@ ssh devhost 'sh -s -- homeflix/bin/homeflix' < scripts/smoke-test.sh
 
 ## License
 
-MIT, see [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE). The web client includes hls.js under the
+Apache License 2.0; see [NOTICE](NOTICE).

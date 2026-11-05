@@ -25,6 +25,7 @@ import (
 	"homeflix/internal/clientaddr"
 	"homeflix/internal/config"
 	"homeflix/internal/discovery"
+	"homeflix/internal/hls"
 	"homeflix/internal/images"
 	"homeflix/internal/jellyfin"
 	"homeflix/internal/library"
@@ -58,7 +59,8 @@ Commands:
   match     look up movies at TMDB, list and correct matches
   backup    write a consistent copy of the database
   stats     summarise containers and codecs of the libraries
-  user      manage users (add, passwd, delete, list)
+  keyframes list the video keyframes of files, read from their index
+  user      manage users (add, passwd, admin, delete, list)
   version   print the version
 
 Run "homeflix <command> -h" for the flags of a command.
@@ -81,6 +83,8 @@ func run(args []string, cio cliIO) error {
 		return backupCommand(args[1:], cio)
 	case "stats":
 		return statsCommand(args[1:], cio)
+	case "keyframes":
+		return keyframesCommand(args[1:], cio)
 	case "user":
 		return userCommand(args[1:], cio)
 	case "version":
@@ -160,6 +164,7 @@ func serve(args []string, stdout, stderr io.Writer) error {
 	}
 	imgs := &images.Service{FFmpeg: cfg.FFmpeg, Dir: filepath.Join(cfg.DataDir, "images"), Workers: cfg.ImageWorkers, Log: log}
 	subs := &subtitles.Service{FFmpeg: cfg.FFmpeg, Dir: filepath.Join(cfg.DataDir, "subtitles"), Log: log}
+	remux := &hls.Manager{FFmpeg: cfg.FFmpeg, Dir: filepath.Join(cfg.DataDir, "transcode"), Workers: cfg.TranscodeWorkers, Log: log}
 
 	var background sync.WaitGroup
 	defer background.Wait()
@@ -222,6 +227,11 @@ func serve(args []string, stdout, stderr io.Writer) error {
 	if cfg.Discovery {
 		startDiscovery(ctx, &background, cfg, serverID, log)
 	}
+	background.Add(1)
+	go func() {
+		defer background.Done()
+		remux.Run(ctx)
+	}()
 	// Commands such as "homeflix match" change the database while the
 	// server runs; they bump a version the server watches.
 	background.Add(1)
@@ -264,6 +274,7 @@ func serve(args []string, stdout, stderr io.Writer) error {
 			Reload:           reload,
 			Settings:         settingsOf(cfg, *configPath),
 			Subtitles:        subs,
+			HLS:              remux,
 		}).Handler(),
 		RequestScan: requestScan,
 	}
