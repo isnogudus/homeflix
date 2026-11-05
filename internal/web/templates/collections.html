@@ -1,0 +1,5 @@
+{{define "title"}}{{t "collections"}}{{end}}
+{{define "content"}}
+<h1>{{t "collections"}} <span class="count">{{len .Data.Cards}}</span></h1>
+{{if .Data.Cards}}{{template "cards" .Data.Cards}}{{else}}<p class="note">{{t "noCollections"}}</p>{{end}}
+{{end}}

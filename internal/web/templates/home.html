@@ -1,8 +1,21 @@
 {{define "title"}}{{t "home"}}{{end}}
 {{define "content"}}
-<section class="card">
-	<h1>{{printf (t "welcome") .Session.User.Name}}</h1>
-	<p>{{t "comingSoon"}}</p>
-	{{if .Data.AdminLink}}<p><a href="/admin/">{{t "admin"}}</a></p>{{end}}
+{{if .Data.Resume}}
+<section class="row">
+	<h2>{{t "continue"}}</h2>
+	<ul class="cards wide">
+	{{range .Data.Resume}}
+		<li><a class="tile" href="{{.URL}}">
+			<span class="poster still">{{if .Image}}<img src="{{.Image}}" alt="" loading="lazy">{{end}}</span>
+			{{if .Progress}}<progress max="100" value="{{.Progress}}"></progress>{{end}}
+			<span class="name">{{.Title}}</span>{{with .Sub}}<span class="sub">{{t "part"}} {{.}}</span>{{end}}
+		</a></li>
+	{{end}}
+	</ul>
 </section>
+{{end}}
+{{template "row" (dict "Title" "latest" "URL" "/web/movies?sort=sortAdded" "Cards" .Data.Latest)}}
+{{template "row" (dict "Title" "favorites" "URL" "/web/movies?show=favorites" "Cards" .Data.Favorites)}}
+{{template "row" (dict "Title" "collections" "URL" "/web/collections" "Cards" .Data.Collections)}}
+{{if not (or .Data.Resume .Data.Latest)}}<p class="note">{{t "emptyLibrary"}}</p>{{end}}
 {{end}}

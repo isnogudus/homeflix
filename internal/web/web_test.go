@@ -143,7 +143,7 @@ func TestLoginAndLogout(t *testing.T) {
 		t.Errorf("cookie over plain HTTP: %+v", c)
 	}
 	rec = f.do(lan, "GET", "/web/", nil, c)
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "Willkommen, anna.") || strings.Contains(rec.Body.String(), "/admin/") {
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "Die Bibliothek ist leer") || strings.Contains(rec.Body.String(), "/admin/") {
 		t.Errorf("home: %d %q", rec.Code, rec.Body.String())
 	}
 	// The web session is a device of the user, like a Moonfin app.
@@ -255,9 +255,16 @@ func TestLockout(t *testing.T) {
 
 func TestStatic(t *testing.T) {
 	f := newFixture(t)
-	rec := f.do(lan, "GET", "/web/static/style.css", nil, nil)
-	if rec.Code != 200 || !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/css") {
+	if rec := f.do(lan, "GET", "/favicon.ico", nil, nil); rec.Code != 200 || rec.Header().Get("Content-Type") != "image/svg+xml" {
+		t.Errorf("favicon: %d %v", rec.Code, rec.Header())
+	}
+	rec := f.do(lan, "GET", asset("style.css"), nil, nil)
+	if rec.Code != 200 || !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/css") ||
+		!strings.Contains(rec.Header().Get("Cache-Control"), "immutable") || len(assetVersions["style.css"]) != 12 {
 		t.Errorf("stylesheet: %d %v", rec.Code, rec.Header())
+	}
+	if rec := f.do(lan, "GET", "/web/static/style.css", nil, nil); strings.Contains(rec.Header().Get("Cache-Control"), "immutable") {
+		t.Error("unversioned stylesheet cached for good")
 	}
 }
 

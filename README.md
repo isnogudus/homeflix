@@ -157,10 +157,23 @@ This product uses the TMDB API but is not endorsed or certified by TMDB.
 ## Web pages and remote access
 
 homeflix has web pages of its own: the web client under `/web/` (the
-server address alone leads there) and the admin UI under `/admin/`. The web
-client is being built in [stage 2](docs/plan-stage2.md). The admin UI
-shows the state of the server and does what the `user` and `match`
-commands do:
+server address alone leads there) and the admin UI under `/admin/`, both
+being extended in [stage 2](docs/plan-stage2.md).
+
+The web client works on phones and laptops: a home screen with "continue
+watching", recently added, favourites and collections; the movie grid with
+sorting, letters, genres, watched and favourite filters and optional
+grouping into collections; search over movies, people and collections;
+details with cast and crew, versions, audio and subtitle tracks and similar
+movies; collection and person pages; and an account page to change the
+password and sign out devices. The player plays a movie's parts one after
+another and keeps the position in sync with Jellyfin clients. For now it
+plays what browsers decode themselves (h264 with AAC or MP3 in MP4, about
+60 % of a typical library); other files say what is missing until the
+server converts them.
+
+The admin UI shows the state of the server and does what the `user` and
+`match` commands do:
 
 - overview: library, metadata, requests to TMDB, last scan, and how
   homeflix sees your request (address, proxy);

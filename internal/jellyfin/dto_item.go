@@ -8,6 +8,7 @@ import (
 	"homeflix/internal/catalog"
 	"homeflix/internal/images"
 	"homeflix/internal/media"
+	"homeflix/internal/playstate"
 	"homeflix/internal/store"
 )
 
@@ -324,14 +325,8 @@ func userDataDto(id string, d store.UserData, runtime time.Duration) UserItemDat
 	return u
 }
 
-// runtimeOf is the duration playback positions of a movie refer to: that
-// of the first file of its default version.
-func runtimeOf(m *catalog.Movie) time.Duration {
-	if len(m.Versions) == 0 {
-		return 0
-	}
-	return m.Versions[0].Parts[0].Info.Duration
-}
+// runtimeOf is the duration playback positions of a movie refer to.
+func runtimeOf(m *catalog.Movie) time.Duration { return playstate.Runtime(m) }
 
 func chapterDtos(info media.Info) []ChapterInfoDto {
 	out := []ChapterInfoDto{}

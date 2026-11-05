@@ -1,3 +1,37 @@
+{{define "scripts"}}{{end}}
+
+{{define "cards"}}
+<ul class="cards">
+{{range .}}
+	<li><a class="tile" href="{{.URL}}">
+		<span class="poster">{{if .Image}}<img src="{{.Image}}" alt="" loading="lazy">{{else}}<span class="noimage">{{.Title}}</span>{{end}}{{if .Played}}<span class="seen" aria-label="{{t "played"}}">✓</span>{{end}}</span>
+		{{if .Progress}}<progress max="100" value="{{.Progress}}"></progress>{{end}}
+		<span class="name">{{.Title}}</span>{{with .Sub}}<span class="sub">{{.}}</span>{{end}}
+	</a></li>
+{{end}}
+</ul>
+{{end}}
+
+{{define "row"}}
+{{if .Cards}}
+<section class="row">
+	<h2>{{if .URL}}<a href="{{.URL}}">{{t .Title}}</a>{{else}}{{t .Title}}{{end}}</h2>
+	{{template "cards" .Cards}}
+</section>
+{{end}}
+{{end}}
+
+{{define "people"}}
+<ul class="people">
+{{range .}}
+	<li><a href="{{.URL}}">
+		<span class="photo">{{if .Image}}<img src="{{.Image}}" alt="" loading="lazy">{{end}}</span>
+		<span class="name">{{.Name}}</span>{{with .Role}}<span class="sub">{{.}}</span>{{end}}
+	</a></li>
+{{end}}
+</ul>
+{{end}}
+
 {{define "csrf"}}<input type="hidden" name="csrf" value="{{.Session.CSRF}}">{{end}}
 
 {{define "adminnav"}}

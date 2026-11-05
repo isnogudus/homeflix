@@ -1,0 +1,13 @@
+{{define "title"}}{{.Data.Name}}{{end}}
+{{define "content"}}
+{{with .Data.Backdrop}}<div class="backdrop"><img src="{{.}}" alt=""></div>{{end}}
+<article class="details">
+	<div class="cover">{{with .Data.Poster}}<img src="{{.}}" alt="">{{end}}</div>
+	<div class="info">
+		<h1>{{.Data.Name}}</h1>
+		<p class="facts"><span>{{len .Data.Cards}} {{t "movies"}}</span></p>
+		{{with .Data.Overview}}<p class="overview">{{.}}</p>{{end}}
+	</div>
+</article>
+{{template "cards" .Data.Cards}}
+{{end}}

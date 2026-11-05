@@ -96,7 +96,8 @@ func (s *Server) withWeb(api http.Handler) http.Handler {
 		switch {
 		case p == "/" && r.Method == http.MethodGet:
 			http.Redirect(w, r, "/web/", http.StatusFound)
-		case p == "/web" || strings.HasPrefix(p, "/web/") || p == "/admin" || strings.HasPrefix(p, "/admin/"):
+		case p == "/web" || strings.HasPrefix(p, "/web/") || p == "/admin" || strings.HasPrefix(p, "/admin/") ||
+			p == "/favicon.ico":
 			s.Web.ServeHTTP(w, r)
 		default:
 			api.ServeHTTP(w, r)

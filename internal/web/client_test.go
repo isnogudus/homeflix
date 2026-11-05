@@ -1,0 +1,260 @@
+package web
+
+import (
+	"context"
+	"encoding/json"
+	"html"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"testing"
+	"time"
+
+	"homeflix/internal/catalog"
+	"homeflix/internal/store"
+	"homeflix/internal/tmdb"
+)
+
+const (
+	slaveID   = "a2000000000000000000000000000001" // MP4, h264 + AAC: plays in browsers
+	arrivalID = "a2000000000000000000000000000002" // MKV, HEVC + AC3: does not yet
+	splitID   = "a2000000000000000000000000000003" // MP4 in two parts
+	libID     = "11111111111111111111111111111111"
+)
+
+func probeFixture(t *testing.T, name string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("..", "media", "testdata", name+".json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// clientFixture serves the web client over a small catalog whose files
+// exist; it returns the fixture, anna's cookie and the file contents.
+func clientFixture(t *testing.T, meta ...map[string]store.Metadata) (*fixture, *http.Cookie, map[string]string) {
+	t.Helper()
+	dir := t.TempDir()
+	contents := map[string]string{}
+	file := func(id, item, version string, part int, name, probe string) store.MediaFile {
+		p := filepath.Join(dir, name)
+		data := strings.Repeat(id+";", 50)
+		os.WriteFile(p, []byte(data), 0o644)
+		contents[id] = data
+		return store.MediaFile{ID: id, ItemID: item, Version: version, Part: part, Path: p, Size: int64(len(data)), Probe: probe}
+	}
+	slave, arrival := probeFixture(t, "twelve-years"), probeFixture(t, "arrival")
+	now := time.Now()
+	items := []store.Item{
+		{ID: slaveID, LibraryID: libID, Type: "Movie", Title: "12 Years a Slave", SortTitle: "12 years a slave", Year: 2013,
+			DateCreated: now.Add(-time.Hour), Files: []store.MediaFile{file("f1", slaveID, "", 0, "slave.mp4", slave)}},
+		{ID: arrivalID, LibraryID: libID, Type: "Movie", Title: "Arrival", SortTitle: "arrival", Year: 2016,
+			DateCreated: now, Files: []store.MediaFile{file("f2", arrivalID, "", 0, "arrival.mkv", arrival)}},
+		{ID: splitID, LibraryID: libID, Type: "Movie", Title: "Beta", SortTitle: "beta", Year: 2001,
+			DateCreated: now.Add(-2 * time.Hour), Files: []store.MediaFile{
+				file("f3", splitID, "", 1, "beta part1.mp4", slave), file("f4", splitID, "", 2, "beta part2.mp4", slave)}},
+	}
+	var f *fixture
+	f = newFixture(t, func(s *Server) {
+		s.Catalog = &catalog.Catalog{Store: s.Store}
+		s.Catalog.Set(catalog.Build([]store.Library{{ID: libID, Name: "Filme", CollectionType: "movies"}}, items,
+			catalog.Options{Locale: "de", Metadata: firstOr(meta)}))
+	})
+	_, c := f.login(lan, "anna", "pw-anna")
+	return f, c, contents
+}
+
+func TestBrowse(t *testing.T) {
+	f, c, _ := clientFixture(t)
+	rec := f.do(lan, "GET", "/web/", nil, c)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "Zuletzt hinzugefügt") || !strings.Contains(rec.Body.String(), "/web/movies/"+arrivalID) {
+		t.Errorf("home: %d %s", rec.Code, rec.Body.String())
+	}
+	titles := func(body string) string {
+		var out []string
+		for _, m := range regexp.MustCompile(`<span class="name">([^<]*)</span>`).FindAllStringSubmatch(body, -1) {
+			out = append(out, html.UnescapeString(m[1]))
+		}
+		return strings.Join(out, ", ")
+	}
+	for q, want := range map[string]string{
+		"":                "12 Years a Slave, Arrival, Beta",
+		"?sort=sortAdded": "Arrival, 12 Years a Slave, Beta",
+		"?sort=sortYear":  "Arrival, 12 Years a Slave, Beta",
+		"?letter=B":       "Beta",
+		"?letter=%23":     "12 Years a Slave",
+	} {
+		rec := f.do(lan, "GET", "/web/movies"+q, nil, c)
+		if got := titles(rec.Body.String()); rec.Code != 200 || got != want {
+			t.Errorf("movies%s: %d %q, want %q", q, rec.Code, got, want)
+		}
+	}
+	rec = f.do(lan, "GET", "/web/search?q=arr", nil, c)
+	if got := titles(rec.Body.String()); got != "Arrival" {
+		t.Errorf("search: %q", got)
+	}
+	for _, p := range []string{"/web/collections", "/web/account"} {
+		if rec := f.do(lan, "GET", p, nil, c); rec.Code != 200 {
+			t.Errorf("%s: %d", p, rec.Code)
+		}
+	}
+	for _, p := range []string{"/web/movies/nope", "/web/collections/nope", "/web/people/nope", "/web/play/nope"} {
+		if rec := f.do(lan, "GET", p, nil, c); rec.Code != http.StatusNotFound {
+			t.Errorf("%s: %d", p, rec.Code)
+		}
+	}
+}
+
+// playerConfig reads the player configuration from a play page.
+func playerConfig(t *testing.T, body string) map[string]any {
+	t.Helper()
+	m := regexp.MustCompile(`data-config="([^"]*)"`).FindStringSubmatch(body)
+	if m == nil {
+		t.Fatalf("no player config in %s", body)
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal([]byte(html.UnescapeString(m[1])), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	return cfg
+}
+
+func TestDetailsAndPlayer(t *testing.T) {
+	f, c, contents := clientFixture(t)
+	rec := f.do(lan, "GET", "/web/movies/"+slaveID, nil, c)
+	body := rec.Body.String()
+	if rec.Code != 200 || !strings.Contains(body, "/web/play/"+slaveID) || !strings.Contains(body, "Der Browser spielt") {
+		t.Fatalf("details: %d %s", rec.Code, body)
+	}
+	rec = f.do(lan, "GET", "/web/movies/"+arrivalID, nil, c)
+	if !strings.Contains(rec.Body.String(), "Browser können diesen Container noch nicht öffnen") || strings.Contains(rec.Body.String(), "/web/play/") {
+		t.Errorf("unplayable details: %s", rec.Body.String())
+	}
+	if rec := f.do(lan, "GET", "/web/play/"+arrivalID, nil, c); strings.Contains(rec.Body.String(), "data-config") {
+		t.Error("player for an unplayable movie")
+	}
+
+	rec = f.do(lan, "GET", "/web/play/"+splitID+"?part=1&t=90", nil, c)
+	cfg := playerConfig(t, rec.Body.String())
+	parts, _ := cfg["parts"].([]any)
+	if len(parts) != 2 || cfg["part"] != 1.0 || cfg["start"] != 90.0 || cfg["csrf"] != csrfOf(c) {
+		t.Fatalf("player config: %v", cfg)
+	}
+	second := parts[1].(map[string]any)
+	if second["item"] != "f4" || second["src"] != "/web/stream/f4" || second["duration"].(float64) < 7000 {
+		t.Errorf("second part: %v", second)
+	}
+	if !strings.Contains(rec.Body.String(), `<script src="/web/static/player.js?v=`+assetVersions["player.js"]+`" defer></script>`) {
+		t.Error("player script missing")
+	}
+
+	// The stream needs the session and answers ranges.
+	if rec := f.do(lan, "GET", "/web/stream/f1", nil, nil); rec.Code != http.StatusFound {
+		t.Errorf("stream without session: %d", rec.Code)
+	}
+	req := f.do(lan, "GET", "/web/stream/f1", nil, c)
+	if req.Code != 200 || req.Header().Get("Content-Type") != "video/mp4" || req.Body.String() != contents["f1"] {
+		t.Errorf("stream: %d %v", req.Code, req.Header())
+	}
+	if rec := f.do(lan, "GET", "/web/subtitles/f1/2", nil, c); rec.Code != http.StatusNotFound {
+		t.Errorf("subtitles without extraction: %d", rec.Code)
+	}
+}
+
+func TestProgressAndResume(t *testing.T) {
+	f, c, _ := clientFixture(t)
+	ctx := context.Background()
+	report := func(item, event string, secs string) {
+		t.Helper()
+		rec := f.post("/web/progress", c, url.Values{"item": {item}, "source": {slaveID}, "event": {event}, "position": {secs}})
+		if rec.Code != http.StatusNoContent {
+			t.Fatalf("%s %s: %d", item, event, rec.Code)
+		}
+	}
+	report(slaveID, "start", "0")
+	report(slaveID, "progress", "1800")
+	report(slaveID, "stop", "1805")
+	anna := f.user("anna")
+	d, _ := f.db.GetUserData(ctx, anna.ID, slaveID)
+	if d.Position != 1805*time.Second || d.Played {
+		t.Errorf("after stop: %+v", d)
+	}
+	rec := f.do(lan, "GET", "/web/movies/"+slaveID, nil, c)
+	if !strings.Contains(rec.Body.String(), "Fortsetzen bei 30:05") || !strings.Contains(rec.Body.String(), "t=1805") {
+		t.Errorf("resume button: %s", rec.Body.String())
+	}
+	if rec := f.do(lan, "GET", "/web/", nil, c); !strings.Contains(rec.Body.String(), "Weiterschauen") {
+		t.Error("home lacks continue watching")
+	}
+	// Past 90 % the movie counts as watched.
+	report(slaveID, "stop", "7500")
+	if d, _ := f.db.GetUserData(ctx, anna.ID, slaveID); !d.Played || d.Position != 0 {
+		t.Errorf("after the end: %+v", d)
+	}
+	// Finishing the last part marks the split movie watched.
+	report("f4", "stop", "7600")
+	if d, _ := f.db.GetUserData(ctx, anna.ID, splitID); !d.Played {
+		t.Errorf("split movie after its last part: %+v", d)
+	}
+	// Progress needs the form token.
+	if rec := f.do(lan, "POST", "/web/progress", url.Values{"item": {slaveID}, "event": {"stop"}, "position": {"10"}}, c); rec.Code != http.StatusForbidden {
+		t.Errorf("progress without token: %d", rec.Code)
+	}
+}
+
+func TestPlayedAndFavorite(t *testing.T) {
+	f, c, _ := clientFixture(t)
+	ctx := context.Background()
+	anna := f.user("anna")
+	f.post("/web/movies/"+splitID+"/played", c, url.Values{"played": {"on"}})
+	for _, id := range []string{splitID, "f4"} {
+		if d, _ := f.db.GetUserData(ctx, anna.ID, id); !d.Played {
+			t.Errorf("%s not watched", id)
+		}
+	}
+	f.post("/web/movies/"+splitID+"/favorite", c, url.Values{"favorite": {"on"}})
+	if d, _ := f.db.GetUserData(ctx, anna.ID, splitID); !d.IsFavorite {
+		t.Error("not a favourite")
+	}
+	if rec := f.do(lan, "GET", "/web/movies?show=favorites", nil, c); !strings.Contains(rec.Body.String(), "/web/movies/"+splitID) ||
+		strings.Contains(rec.Body.String(), "/web/movies/"+slaveID) {
+		t.Error("favourites filter")
+	}
+}
+
+func TestOwnAccount(t *testing.T) {
+	f, c, _ := clientFixture(t)
+	if rec := f.post("/web/account/password", c, url.Values{"current": {"wrong"}, "password": {"neu"}, "confirm": {"neu"}}); !strings.HasSuffix(rec.Header().Get("Location"), "err=currentWrong") {
+		t.Errorf("wrong current password: %v", rec.Header())
+	}
+	rec := f.post("/web/account/password", c, url.Values{"current": {"pw-anna"}, "password": {"neu"}, "confirm": {"neu"}})
+	if rec.Header().Get("Location") != "/web/login" {
+		t.Errorf("password change: %v", rec.Header())
+	}
+	if _, c2 := f.login(lan, "anna", "neu"); c2 == nil {
+		t.Error("new password does not work")
+	}
+}
+
+func firstOr(m []map[string]store.Metadata) map[string]store.Metadata {
+	if len(m) == 0 {
+		return nil
+	}
+	return m[0]
+}
+
+func TestCrewAndCast(t *testing.T) {
+	data, _ := json.Marshal(tmdb.Movie{ID: 1, Title: "12 Years a Slave", People: []tmdb.Person{
+		{ID: 1, Name: "Steve McQueen", Type: "Director"}, {ID: 1, Name: "Steve McQueen", Type: "Writer"},
+		{ID: 2, Name: "Chiwetel Ejiofor", Role: "Solomon Northup", Type: "Actor"},
+	}})
+	f, c, _ := clientFixture(t, map[string]store.Metadata{slaveID: {ItemID: slaveID, Status: store.MetaMatched, Data: string(data)}})
+	body := f.do(lan, "GET", "/web/movies/"+slaveID, nil, c).Body.String()
+	if strings.Count(body, "Steve McQueen") != 1 || !strings.Contains(body, "Regie, Drehbuch") || !strings.Contains(body, "Solomon Northup") {
+		t.Errorf("people: %s", body)
+	}
+}

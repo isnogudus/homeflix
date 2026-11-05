@@ -1,0 +1,21 @@
+{{define "title"}}{{t "movies"}}{{end}}
+{{define "content"}}
+<div class="toolbar">
+	<h1>{{if .Data.Genre}}{{.Data.Genre}} <a class="clear" href="{{.Data.ClearGenre}}" aria-label="{{t "clearFilter"}}">×</a>{{else}}{{t "movies"}}{{end}} <span class="count">{{.Data.Total}}</span></h1>
+	<nav class="pills" aria-label="{{t "sortBy"}}">{{range .Data.Sorts}}<a href="{{.URL}}"{{if .Current}} aria-current="page"{{end}}>{{t .Label}}</a>{{end}}</nav>
+	<nav class="pills" aria-label="{{t "filter"}}">{{range .Data.Shows}}<a href="{{.URL}}"{{if .Current}} aria-current="page"{{end}}>{{t .Label}}</a>{{end}}
+		<a href="{{.Data.Group.URL}}"{{if .Data.Group.Current}} aria-current="page"{{end}}>{{t .Data.Group.Label}}</a></nav>
+</div>
+<nav class="letters" aria-label="{{t "byLetter"}}">
+	<a href="{{.Data.AllLetters.URL}}"{{if .Data.AllLetters.Current}} aria-current="page"{{end}}>{{t "all"}}</a>
+	{{range .Data.Letters}}<a href="{{.URL}}"{{if .Current}} aria-current="page"{{end}}>{{.Label}}</a>{{end}}
+</nav>
+{{if .Data.Cards}}{{template "cards" .Data.Cards}}{{else}}<p class="note">{{t "noMovies"}}</p>{{end}}
+{{if or .Data.Prev .Data.Next}}
+<nav class="pager">
+	{{with .Data.Prev}}<a href="{{.}}" rel="prev">← {{t "previous"}}</a>{{end}}
+	<span>{{.Data.Page}} / {{.Data.Pages}}</span>
+	{{with .Data.Next}}<a href="{{.}}" rel="next">{{t "next"}} →</a>{{end}}
+</nav>
+{{end}}
+{{end}}

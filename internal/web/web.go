@@ -20,6 +20,7 @@ import (
 	"homeflix/internal/metadata"
 	"homeflix/internal/outbound"
 	"homeflix/internal/store"
+	"homeflix/internal/subtitles"
 )
 
 //go:embed templates/*.html
@@ -56,6 +57,9 @@ type Server struct {
 	Reload   func()
 	Settings []Setting
 
+	// For the web client: text subtitles as WebVTT; nil leaves them out.
+	Subtitles *subtitles.Service
+
 	pages map[string]*template.Template
 }
 
@@ -64,12 +68,19 @@ func (s *Server) Handler() http.Handler {
 	s.pages = parsePages()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /web", redirect("/web/"))
-	mux.HandleFunc("GET /web/{$}", s.signedIn(s.home))
 	mux.HandleFunc("GET /web/login", s.loginPage)
 	mux.HandleFunc("POST /web/login", s.login)
 	mux.HandleFunc("POST /web/logout", s.signedIn(s.logout))
 	static, _ := fs.Sub(staticFiles, "static")
 	mux.Handle("GET /web/static/", http.StripPrefix("/web/static/", staticHandler(static)))
+	// Browsers ask for it on their own; the icon is an SVG.
+	mux.HandleFunc("GET /favicon.ico", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/svg+xml")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		b, _ := fs.ReadFile(static, "favicon.svg")
+		w.Write(b)
+	})
+	s.registerClient(mux)
 	s.registerAdmin(mux)
 	return securityHeaders(sameOrigin(mux))
 }
@@ -114,11 +125,16 @@ func sameOrigin(next http.Handler) http.Handler {
 	})
 }
 
-// staticHandler serves embedded files with a day of caching.
+// staticHandler serves embedded files. Pages link them with their version
+// (asset), so those requests may be cached for good; others for an hour.
 func staticHandler(files fs.FS) http.Handler {
 	fsrv := http.FileServerFS(files)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "public, max-age=86400")
+		if v := r.URL.Query().Get("v"); v != "" && v == assetVersions[strings.TrimPrefix(r.URL.Path, "/")] {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		} else {
+			w.Header().Set("Cache-Control", "public, max-age=3600")
+		}
 		fsrv.ServeHTTP(w, r)
 	})
 }
@@ -144,10 +160,4 @@ func (s *Server) admin(h sessionHandler) sessionHandler {
 			h(w, r, sess)
 		}
 	}
-}
-
-func (s *Server) home(w http.ResponseWriter, r *http.Request, sess *session) {
-	s.render(w, r, http.StatusOK, "home", sess, map[string]any{
-		"AdminLink": sess.User.IsAdmin && s.adminAllowed(r),
-	})
 }

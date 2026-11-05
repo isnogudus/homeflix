@@ -1,0 +1,16 @@
+{{define "title"}}{{.Data.Name}}{{end}}
+{{define "content"}}
+<article class="details">
+	<div class="cover">{{with .Data.Photo}}<img src="{{.}}" alt="">{{end}}</div>
+	<div class="info">
+		<h1>{{.Data.Name}}</h1>
+		<p class="facts">
+			{{with .Data.Born}}<span>* {{day .}}</span>{{end}}
+			{{with .Data.Died}}<span>† {{day .}}</span>{{end}}
+			{{with .Data.Place}}<span>{{.}}</span>{{end}}
+		</p>
+		{{with .Data.Biography}}<p class="overview">{{.}}</p>{{end}}
+	</div>
+</article>
+<section class="row"><h2>{{t "movies"}} <span class="count">{{len .Data.Cards}}</span></h2>{{template "cards" .Data.Cards}}</section>
+{{end}}

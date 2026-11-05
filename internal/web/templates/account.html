@@ -1,0 +1,36 @@
+{{define "title"}}{{t "account"}}{{end}}
+{{define "content"}}
+{{with .Data.Ok}}<p class="flash ok" role="status">{{t .}}</p>{{end}}
+{{with .Data.Err}}<p class="flash err" role="alert">{{t .}}</p>{{end}}
+{{$ := .}}
+<h1>{{.Session.User.Name}}</h1>
+<section class="card">
+	<h2>{{t "devices"}}</h2>
+	<table>
+		<thead><tr><th>{{t "device"}}</th><th class="wide">{{t "client"}}</th><th>{{t "lastSeen"}}</th><th class="wide">{{t "from"}}</th><th></th></tr></thead>
+		<tbody>
+		{{range .Data.Devices}}
+		<tr>
+			<td>{{.DeviceName}}{{if eq .SessionID $.Data.OwnSession}} ({{t "thisSession"}}){{end}}</td>
+			<td class="wide">{{.Client}} {{.ClientVersion}}</td>
+			<td>{{date .LastSeenAt}}</td>
+			<td class="mono wide">{{.RemoteAddr}}</td>
+			<td><form method="post" action="/web/account/sessions/{{.SessionID}}/end">{{template "csrf" $}}<button>{{t "endSession"}}</button></form></td>
+		</tr>
+		{{end}}
+		</tbody>
+	</table>
+</section>
+<section class="card">
+	<h2>{{t "changePassword"}}</h2>
+	<form class="stack" method="post" action="/web/account/password">
+		{{template "csrf" .}}
+		<input type="text" name="username" value="{{.Session.User.Name}}" autocomplete="username" hidden>
+		<label>{{t "currentPassword"}}<input name="current" type="password" autocomplete="current-password" required></label>
+		<label>{{t "newPassword"}}<input name="password" type="password" autocomplete="new-password" required></label>
+		<label>{{t "confirm"}}<input name="confirm" type="password" autocomplete="new-password" required></label>
+		<p class="note">{{t "setPasswordNote"}}</p>
+		<button>{{t "changePassword"}}</button>
+	</form>
+</section>
+{{end}}

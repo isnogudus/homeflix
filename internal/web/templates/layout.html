@@ -3,15 +3,27 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="same-origin">
 <title>{{template "title" .}} · {{.Server}}</title>
-<link rel="stylesheet" href="/web/static/style.css">
+<link rel="stylesheet" href="{{asset "style.css"}}">
+<link rel="icon" href="{{asset "favicon.svg"}}" type="image/svg+xml">
+{{template "scripts" .}}
 </head>
 <body>
 <header class="bar">
 	<a class="brand" href="/web/">homeflix</a>
 	{{with .Session}}
-	<nav>
-		<span class="who">{{t "signedInAs"}} {{.User.Name}}</span>
+	<nav class="main" aria-label="{{t "navigation"}}">
+		<a href="/web/"{{if eq $.Data.Nav "home"}} aria-current="page"{{end}}>{{t "home"}}</a>
+		<a href="/web/movies"{{if eq $.Data.Nav "movies"}} aria-current="page"{{end}}>{{t "movies"}}</a>
+		<a href="/web/collections"{{if eq $.Data.Nav "collections"}} aria-current="page"{{end}}>{{t "collections"}}</a>
+	</nav>
+	<form class="find" method="get" action="/web/search" role="search">
+		<input type="search" name="q" value="{{$.Data.Query}}" placeholder="{{t "searchPlaceholder"}}" aria-label="{{t "search"}}">
+	</form>
+	<nav class="me">
+		{{if or $.Data.AdminLink $.Data.Tab}}<a href="/admin/">{{t "admin"}}</a>{{end}}
+		<a href="/web/account"{{if eq $.Data.Nav "account"}} aria-current="page"{{end}}>{{.User.Name}}</a>
 		<form method="post" action="/web/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button>{{t "signOut"}}</button></form>
 	</nav>
 	{{end}}

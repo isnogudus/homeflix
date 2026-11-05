@@ -6,16 +6,8 @@ import (
 	"time"
 
 	"homeflix/internal/catalog"
+	"homeflix/internal/playstate"
 	"homeflix/internal/store"
-)
-
-// Jellyfin's default resume rules: positions in the first 5 % are not
-// kept, from 90 % on the item counts as played, and items shorter than
-// five minutes are never resumed.
-const (
-	minResumeFraction = 0.05
-	maxResumeFraction = 0.90
-	minResumeRuntime  = 5 * time.Minute
 )
 
 func (s *Server) registerUserData(rt *Router) {
@@ -42,30 +34,13 @@ func (s *Server) registerUserData(rt *Router) {
 	}
 }
 
-// playable is an item user data can be kept for: a movie, an extra or a
-// later part of a movie.
-type playable struct {
-	id      string
-	movie   *catalog.Movie
-	part    *catalog.PartRef // set for later parts
-	runtime time.Duration
-}
+// playable is an item user data can be kept for.
+type playable = playstate.Item
 
 // resolvePlayable finds an item; sourceID, if set, picks the version
 // whose runtime counts.
 func (s *Server) resolvePlayable(itemID, sourceID string) (playable, bool) {
-	snap := s.Catalog.Snapshot()
-	if m, ok := snap.Item(itemID); ok {
-		p := playable{id: m.ID, movie: m, runtime: runtimeOf(m)}
-		if _, v, ok := snap.Source(sourceID); ok && len(v.Parts) > 0 {
-			p.runtime = v.Parts[0].Info.Duration
-		}
-		return p, true
-	}
-	if r, ok := snap.Part(itemID); ok && r.Index > 0 {
-		return playable{id: itemID, movie: r.Movie, part: &r, runtime: r.Part().Info.Duration}, true
-	}
-	return playable{}, false
+	return playstate.Resolve(s.Catalog.Snapshot(), itemID, sourceID)
 }
 
 // playbackReport is the part of Jellyfin's PlaybackStartInfo,
@@ -79,12 +54,12 @@ type playbackReport struct {
 	Failed        bool
 }
 
-type reportKind int
+type reportKind = playstate.Kind
 
 const (
-	reportStart reportKind = iota
-	reportProgress
-	reportStop
+	reportStart    = playstate.Start
+	reportProgress = playstate.Progress
+	reportStop     = playstate.Stop
 )
 
 func (s *Server) playbackStart(w http.ResponseWriter, r *http.Request, sess *Session) {
@@ -115,73 +90,24 @@ func (s *Server) playbackReport(w http.ResponseWriter, r *http.Request, sess *Se
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	ctx := r.Context()
-	d, err := s.Store.GetUserData(ctx, sess.User.ID, p.id)
+	var pos *time.Duration
+	if rep.PositionTicks != nil {
+		d := time.Duration(*rep.PositionTicks) * 100
+		pos = &d
+	}
+	d, err := playstate.Report(r.Context(), s.Store, sess.User.ID, p, kind, pos, rep.Failed)
 	if err != nil {
 		s.internalError(w, r, err)
 		return
 	}
-	now := time.Now().UTC()
-	d.LastPlayed = now
-	finished := false
-	if rep.PositionTicks != nil && kind != reportStart {
-		pos := time.Duration(*rep.PositionTicks) * 100
-		frac := 0.0
-		if p.runtime > 0 {
-			frac = float64(pos) / float64(p.runtime)
-		}
-		switch {
-		case p.runtime > 0 && frac >= maxResumeFraction:
-			d.Position = 0
-			finished = kind == reportStop
-		case p.runtime > 0 && (frac < minResumeFraction || p.runtime < minResumeRuntime):
-			d.Position = 0
-		default:
-			d.Position = pos
-		}
-	}
-	if finished && !rep.Failed {
-		d.Played = true
-		d.PlayCount++
-	}
-	if err := s.Store.SaveUserData(ctx, sess.User.ID, d); err != nil {
-		s.internalError(w, r, err)
-		return
-	}
-	if finished && p.part != nil && p.part.IsLast() {
-		movie, err := s.Store.GetUserData(ctx, sess.User.ID, p.movie.ID)
-		if err == nil {
-			movie.Played, movie.PlayCount, movie.Position, movie.LastPlayed = true, movie.PlayCount+1, 0, now
-			err = s.Store.SaveUserData(ctx, sess.User.ID, movie)
-		}
-		if err != nil {
-			s.internalError(w, r, err)
-			return
-		}
-	}
 	switch kind {
 	case reportStart:
-		s.Log.Info("playback started", "item", p.movie.Title, "user", sess.User.Name, "client", sess.Token.Client)
+		s.Log.Info("playback started", "item", p.Movie.Title, "user", sess.User.Name, "client", sess.Token.Client)
 	case reportStop:
-		s.Log.Info("playback stopped", "item", p.movie.Title, "user", sess.User.Name, "position", d.Position.Round(time.Second),
+		s.Log.Info("playback stopped", "item", p.Movie.Title, "user", sess.User.Name, "position", d.Position.Round(time.Second),
 			"played", d.Played)
 	}
 	w.WriteHeader(http.StatusNoContent)
-}
-
-// relatedIDs are the items whose state follows a movie's when it is marked
-// played or unplayed by hand: the movie and all later parts of its versions.
-func relatedIDs(p playable) []string {
-	ids := []string{p.id}
-	if p.part != nil {
-		return ids
-	}
-	for _, v := range p.movie.Versions {
-		for _, part := range v.Parts[1:] {
-			ids = append(ids, part.File.ID)
-		}
-	}
-	return ids
 }
 
 func (s *Server) markPlayed(played bool) authedHandler {
@@ -215,36 +141,14 @@ func (s *Server) markPlayed(played bool) authedHandler {
 			s.internalError(w, r, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, userDataDto(p.id, self, p.runtime))
+		writeJSON(w, http.StatusOK, userDataDto(p.ID, self, p.Runtime))
 	}
 }
 
 // setPlayed marks a movie or part, and the later parts of a movie, played
 // or unplayed, and returns the new state of the item itself.
 func (s *Server) setPlayed(ctx context.Context, userID string, p playable, played bool, now time.Time) (store.UserData, error) {
-	var self store.UserData
-	for _, id := range relatedIDs(p) {
-		d, err := s.Store.GetUserData(ctx, userID, id)
-		if err != nil {
-			return self, err
-		}
-		d.Position = 0
-		if played {
-			if !d.Played {
-				d.PlayCount++
-			}
-			d.Played, d.LastPlayed = true, now
-		} else {
-			d.Played, d.PlayCount, d.LastPlayed = false, 0, time.Time{}
-		}
-		if err := s.Store.SaveUserData(ctx, userID, d); err != nil {
-			return self, err
-		}
-		if id == p.id {
-			self = d
-		}
-	}
-	return self, nil
+	return playstate.SetPlayed(ctx, s.Store, userID, p, played, now)
 }
 
 // writeCollectionUserData answers with the user's state of a collection.
@@ -275,12 +179,12 @@ func (s *Server) changeUserData(w http.ResponseWriter, r *http.Request, sess *Se
 	switch {
 	case isCollection:
 		// A collection keeps only its favourite flag of its own.
-		p = playable{id: c.ID}
+		p = playable{ID: c.ID}
 	case !ok:
 		http.NotFound(w, r)
 		return
 	}
-	d, err := s.Store.GetUserData(r.Context(), u.ID, p.id)
+	d, err := s.Store.GetUserData(r.Context(), u.ID, p.ID)
 	if err != nil {
 		s.internalError(w, r, err)
 		return
@@ -296,7 +200,7 @@ func (s *Server) changeUserData(w http.ResponseWriter, r *http.Request, sess *Se
 		s.writeCollectionUserData(w, r, u, c)
 		return
 	}
-	writeJSON(w, http.StatusOK, userDataDto(p.id, d, p.runtime))
+	writeJSON(w, http.StatusOK, userDataDto(p.ID, d, p.Runtime))
 }
 
 func (s *Server) getUserItemData(w http.ResponseWriter, r *http.Request, sess *Session) {

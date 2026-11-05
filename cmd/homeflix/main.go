@@ -263,6 +263,7 @@ func serve(args []string, stdout, stderr io.Writer) error {
 			ScanStatus:       scans.status,
 			Reload:           reload,
 			Settings:         settingsOf(cfg, *configPath),
+			Subtitles:        subs,
 		}).Handler(),
 		RequestScan: requestScan,
 	}
