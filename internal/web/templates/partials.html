@@ -65,3 +65,22 @@
 	{{end}}
 {{else}}<p>{{t "scanNone"}}</p>{{end}}
 {{end}}
+
+{{define "passkeys"}}
+{{if .Rows}}
+<table>
+	<thead><tr><th>{{t "passkeyName"}}</th><th>{{t "address"}}</th><th class="wide">{{t "addedOn"}}</th><th>{{t "lastUsed"}}</th><th></th></tr></thead>
+	<tbody>
+	{{range .Rows}}
+	<tr>
+		<td>{{.Name}}</td>
+		<td class="mono">{{.RPID}}{{if .Here}} ({{t "thisAddress"}}){{end}}</td>
+		<td class="wide">{{date .CreatedAt}}</td>
+		<td>{{date .LastUsedAt}}</td>
+		<td><form method="post" action="{{$.Action}}{{.ID}}/delete">{{template "csrf" $.Root}}<button>{{t "remove"}}</button></form></td>
+	</tr>
+	{{end}}
+	</tbody>
+</table>
+{{else}}<p>{{t "noPasskeys"}}</p>{{end}}
+{{end}}

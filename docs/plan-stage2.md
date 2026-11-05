@@ -264,3 +264,17 @@ exercises sessions, templates and the access rules on a small surface.
    addition.
 4. **Dependencies.** `go-webauthn/webauthn` and vendored hls.js are the
    only new ones; both licences fit next to MIT.
+5. **Per-user conversion rights.** Requested: an admin can deny a user
+   conversion, as in Jellyfin. Jellyfin's user policy has
+   `EnablePlaybackRemuxing` ("conversion without re-encoding"),
+   `EnableVideoPlaybackTranscoding` and `EnableAudioPlaybackTranscoding`.
+   For videos it sets `SupportsDirectStream` from the first and
+   `SupportsTranscoding` from the second; the audio flag only counts for
+   music, except that a video loses transcoding when all three are off.
+   homeflix would keep one setting per user with three levels: *none*
+   (direct play only), *audio* (video copied, audio converted: the N3
+   remux) and *all* (also video transcoding, N5). The Jellyfin policy
+   fields are reported from it (remuxing and audio for *audio*, all three
+   for *all*), the web client offers only what the level allows, and the
+   HLS endpoints refuse the rest. Decided together with the remux offer to
+   Jellyfin clients and the stored keyframe index, after N4.

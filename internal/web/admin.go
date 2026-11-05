@@ -45,6 +45,7 @@ func (s *Server) registerAdmin(mux *http.ServeMux) {
 	mux.HandleFunc("POST /admin/users/{id}/admin", admin(s.adminSetAdmin))
 	mux.HandleFunc("POST /admin/users/{id}/delete", admin(s.adminDeleteUser))
 	mux.HandleFunc("POST /admin/users/{id}/sessions/{session}/end", admin(s.adminEndSession))
+	mux.HandleFunc("POST /admin/users/{id}/passkeys/{cred}/delete", admin(s.adminDeletePasskey))
 	mux.HandleFunc("GET /admin/library", admin(s.adminLibrary))
 	mux.HandleFunc("POST /admin/library/scan", admin(s.adminScan))
 	mux.HandleFunc("GET /admin/metadata", admin(s.adminMetadata))
@@ -248,8 +249,14 @@ func (s *Server) adminUser(w http.ResponseWriter, r *http.Request, sess *session
 		s.fail(w, err)
 		return
 	}
+	keys, err := s.passkeyRows(r, u.ID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 	d := adminData(r, "users")
 	d["User"], d["Self"] = userRow{User: u, Devices: toks}, u.ID == sess.User.ID
+	d["Passkeys"] = keys
 	d["OwnSession"] = sess.Token.SessionID
 	s.render(w, r, http.StatusOK, "admin_user", sess, d)
 }
@@ -540,4 +547,12 @@ func (s *Server) adminSettings(w http.ResponseWriter, r *http.Request, sess *ses
 	d := adminData(r, "settings")
 	d["Settings"] = s.Settings
 	s.render(w, r, http.StatusOK, "admin_settings", sess, d)
+}
+
+func (s *Server) adminDeletePasskey(w http.ResponseWriter, r *http.Request, sess *session) {
+	u, ok := s.targetUser(w, r)
+	if !ok {
+		return
+	}
+	s.deletePasskey(w, r, sess, u, "cred", "/admin/users/"+u.ID)
 }

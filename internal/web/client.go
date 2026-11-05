@@ -659,7 +659,17 @@ func (s *Server) account(w http.ResponseWriter, r *http.Request, sess *session) 
 	for k, v := range adminData(r, "") {
 		d[k] = v
 	}
+	keys, err := s.passkeyRows(r, sess.User.ID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 	d["Devices"], d["OwnSession"] = toks, sess.Token.SessionID
+	d["Passkeys"], d["PasskeysHere"], d["QuickConnect"] = keys, s.passkeyOrigin(r) != "", s.QuickConnect != nil
+	if s.Passkeys != nil {
+		d["PasskeyOrigins"] = s.Passkeys.Origins()
+	}
+	d["DeviceName"] = deviceName(r.UserAgent())
 	s.render(w, r, http.StatusOK, "account", sess, d)
 }
 

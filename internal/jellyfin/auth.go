@@ -169,6 +169,17 @@ func (s *Server) authenticateByName(w http.ResponseWriter, r *http.Request) {
 		s.Logins.Succeeded(req.Username)
 	}
 
+	device := hdr.Device
+	if device == "" {
+		device = "Unknown"
+	}
+	s.signIn(w, r, user, store.Token{DeviceID: hdr.DeviceID, DeviceName: device, Client: hdr.Client,
+		ClientVersion: hdr.Version, RemoteAddr: remoteHost(r)}, "password")
+}
+
+// signIn issues a token for user on the device described by dev and
+// answers with the authentication result.
+func (s *Server) signIn(w http.ResponseWriter, r *http.Request, user store.User, dev store.Token, method string) {
 	token, err := auth.NewToken()
 	if err != nil {
 		s.internalError(w, r, err)
@@ -180,29 +191,15 @@ func (s *Server) authenticateByName(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().UTC()
-	device := hdr.Device
-	if device == "" {
-		device = "Unknown"
-	}
-	tok := store.Token{
-		Hash:          auth.HashToken(token),
-		SessionID:     sessionID,
-		UserID:        user.ID,
-		DeviceID:      hdr.DeviceID,
-		DeviceName:    device,
-		Client:        hdr.Client,
-		ClientVersion: hdr.Version,
-		RemoteAddr:    remoteHost(r),
-		CreatedAt:     now,
-		LastSeenAt:    now,
-	}
+	tok := dev
+	tok.Hash, tok.SessionID, tok.UserID, tok.CreatedAt, tok.LastSeenAt = auth.HashToken(token), sessionID, user.ID, now, now
 	if err := s.Store.CreateToken(r.Context(), tok); err != nil {
 		s.internalError(w, r, err)
 		return
 	}
 	user.LastLoginAt, user.LastActivityAt = now, now
 	s.Log.Info("login", "user", user.Name, "client", tok.Client, "version", tok.ClientVersion,
-		"device", tok.DeviceName, "remote", tok.RemoteAddr)
+		"device", tok.DeviceName, "remote", tok.RemoteAddr, "method", method)
 	writeJSON(w, http.StatusOK, AuthenticationResult{
 		User:        s.userDto(user),
 		SessionInfo: s.sessionDto(tok, user),

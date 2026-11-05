@@ -20,6 +20,8 @@ import (
 	"homeflix/internal/lockout"
 	"homeflix/internal/metadata"
 	"homeflix/internal/outbound"
+	"homeflix/internal/passkey"
+	"homeflix/internal/quickconnect"
 	"homeflix/internal/store"
 	"homeflix/internal/subtitles"
 )
@@ -64,6 +66,13 @@ type Server struct {
 	// those they can.
 	HLS *hls.Manager
 
+	// Passkeys signs users in with passkeys on the configured origins; nil
+	// offers only passwords.
+	Passkeys *passkey.Service
+	// QuickConnect lets apps sign in with a code confirmed on the account
+	// page; nil turns it off.
+	QuickConnect *quickconnect.Service
+
 	pages map[string]*template.Template
 }
 
@@ -84,6 +93,7 @@ func (s *Server) Handler() http.Handler {
 		b, _ := fs.ReadFile(static, "favicon.svg")
 		w.Write(b)
 	})
+	s.registerPasskeys(mux)
 	s.registerClient(mux)
 	s.registerAdmin(mux)
 	return securityHeaders(sameOrigin(mux))

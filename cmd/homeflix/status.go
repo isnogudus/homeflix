@@ -86,6 +86,8 @@ func settingsOf(cfg config.Config, configPath string) []web.Setting {
 		{Name: "discovery", Value: onOff(cfg.Discovery)},
 		{Name: "trusted proxy", Value: nets(cfg.TrustedProxies)},
 		{Name: "admin from", Value: nets(cfg.AdminFrom)},
+		{Name: "passkeys", Value: passkeyOrigins(cfg.PasskeyOrigins)},
+		{Name: "quickconnect", Value: onOff(cfg.QuickConnect)},
 		{Name: "data directory", Value: cfg.DataDir},
 		{Name: "log level", Value: cfg.LogLevel},
 		{Name: "language", Value: cfg.DisplayLanguage},
@@ -108,4 +110,11 @@ func settingsOf(cfg config.Config, configPath string) []web.Setting {
 		out = append(out, web.Setting{Name: "tmdb", Value: "off"})
 	}
 	return out
+}
+
+func passkeyOrigins(origins []string) string {
+	if len(origins) == 0 {
+		return "off"
+	}
+	return strings.Join(origins, ", ")
 }

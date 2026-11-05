@@ -32,6 +32,8 @@ import (
 	"homeflix/internal/lockout"
 	"homeflix/internal/media"
 	"homeflix/internal/metadata"
+	"homeflix/internal/passkey"
+	"homeflix/internal/quickconnect"
 	"homeflix/internal/store"
 	"homeflix/internal/subtitles"
 	"homeflix/internal/web"
@@ -243,6 +245,16 @@ func serve(args []string, stdout, stderr io.Writer) error {
 	// One lockout for the web pages and the Jellyfin API, so that switching
 	// between them gives no extra guesses.
 	logins := lockout.NewGuard()
+	var keys *passkey.Service
+	if len(cfg.PasskeyOrigins) > 0 {
+		if keys, err = passkey.New(db, cfg.ServerName, cfg.PasskeyOrigins); err != nil {
+			return err
+		}
+	}
+	var qc *quickconnect.Service
+	if cfg.QuickConnect {
+		qc = &quickconnect.Service{}
+	}
 	api := &jellyfin.Server{
 		ServerID:         serverID,
 		ServerName:       cfg.ServerName,
@@ -255,6 +267,7 @@ func serve(args []string, stdout, stderr io.Writer) error {
 		Logins:           logins,
 		Clients:          clientaddr.Resolver{Trusted: cfg.TrustedProxies},
 		AdminFrom:        cfg.AdminFrom,
+		QuickConnect:     qc,
 		Shutdown:         ctx,
 		Web: (&web.Server{
 			ServerName:       cfg.ServerName,
@@ -275,6 +288,8 @@ func serve(args []string, stdout, stderr io.Writer) error {
 			Settings:         settingsOf(cfg, *configPath),
 			Subtitles:        subs,
 			HLS:              remux,
+			Passkeys:         keys,
+			QuickConnect:     qc,
 		}).Handler(),
 		RequestScan: requestScan,
 	}

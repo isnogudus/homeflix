@@ -1,15 +1,18 @@
 {{define "title"}}{{t "signIn"}}{{end}}
+{{define "scripts"}}{{if .Data.Passkeys}}<script src="{{asset "passkey.js"}}" defer></script>{{end}}{{end}}
 {{define "content"}}
-<form class="card login" method="post" action="/web/login">
+<form class="card login" id="login" method="post" action="/web/login">
 	<h1>{{.Server}}</h1>
 	{{with .Data.Error}}<p class="error" role="alert">{{t .}}</p>{{end}}
+	{{if .Data.Passkeys}}<p class="error" id="passkeyerror" role="alert" data-cancelled="{{t "passkeyCancelled"}}" data-failed="{{t "passkeyFailed"}}" hidden></p>{{end}}
 	<label>{{t "username"}}
-		<input name="username" value="{{.Data.Username}}" autocomplete="username" autocapitalize="none" required autofocus>
+		<input name="username" value="{{.Data.Username}}" autocomplete="username{{if .Data.Passkeys}} webauthn{{end}}" autocapitalize="none" required autofocus>
 	</label>
 	<label>{{t "password"}}
 		<input name="password" type="password" autocomplete="current-password">
 	</label>
 	<input type="hidden" name="next" value="{{.Data.Next}}">
 	<button class="primary">{{t "signIn"}}</button>
+	{{if .Data.Passkeys}}<button type="button" id="passkeylogin" hidden>{{t "signInPasskey"}}</button>{{end}}
 </form>
 {{end}}

@@ -143,6 +143,35 @@ Caddy forwards everything.
 The default is loopback, the private networks and the tailnet range:
 .Li { 127.0.0.0/8, ::1, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16,
 .Li fc00::/7, 100.64.0.0/10 } .
+.It Ic passkeys Brq ...
+Offer passkeys in the web client on the HTTPS origins listed in the block:
+.Bl -tag -width Ds
+.It Ic origin Ar URL
+An address the web client is opened at, such as
+.Ql https://homeflix.example.ts.net ,
+with scheme, host and, if not the default, port, and nothing more.
+Browsers allow passkeys only over HTTPS, and on
+.Ql http://localhost .
+.El
+.Pp
+Each origin's host is its own relying party: a passkey added on one
+address signs in only there, so a user who uses both the tailnet name and
+the Caddy domain adds a passkey on each.
+Requests reach homeflix through a proxy, so the proxy must be a
+.Ic trusted proxy
+for homeflix to see the address the browser used.
+On an address not listed, and without the block, the web client offers
+passwords only.
+.It Ic no passkeys
+Offer passwords only; this is the default.
+.It Ic quickconnect
+Let Jellyfin apps sign in with Quick Connect: the app shows a six-digit
+code, a user signed in to the web client enters it on the account page,
+and the app is signed in as that user.
+Codes expire after ten minutes.
+This is the default.
+.It Ic no quickconnect
+Answer Quick Connect requests as turned off.
 .It Ic discovery
 Answer the broadcasts on UDP port 7359 with which Jellyfin clients look
 for servers in the local network, so they list homeflix without its
@@ -348,6 +377,17 @@ To use TMDB, store the token readable only by the account running
 homeflix and add:
 .Bd -literal -offset indent
 tmdb { token file "/usr/local/etc/homeflix-tmdb.token" }
+.Ed
+.Pp
+Behind
+.Ql tailscale serve
+on the same host and Caddy on 192.168.1.2, with passkeys on both names:
+.Bd -literal -offset indent
+trusted proxy { 127.0.0.1, 192.168.1.2 }
+passkeys {
+	origin "https://homeflix.example.ts.net"
+	origin "https://kino.example.de"
+}
 .Ed
 .Sh SEE ALSO
 .Xr ffmpeg 1 ,

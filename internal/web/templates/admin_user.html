@@ -32,6 +32,10 @@
 	</table>
 	{{else}}<p>{{t "noDevices"}}</p>{{end}}
 </section>
+<section class="card">
+	<h2>{{t "passkeys"}}</h2>
+	{{template "passkeys" dict "Rows" $.Data.Passkeys "Root" $ "Action" (printf "/admin/users/%s/passkeys/" .ID)}}
+</section>
 <div class="grid">
 	<section class="card">
 		<h2>{{t "setPassword"}}</h2>

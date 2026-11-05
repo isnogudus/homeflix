@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"homeflix/internal/catalog"
+	"homeflix/internal/quickconnect"
 	"homeflix/internal/store"
 )
 
@@ -129,14 +130,73 @@ func TestPanicBecomes500(t *testing.T) {
 
 func TestQuickConnectDisabled(t *testing.T) {
 	h := newTestServer(t, nil).Handler()
+	if rec := get(t, h, "/QuickConnect/Enabled", nil); strings.TrimSpace(rec.Body.String()) != "false" {
+		t.Errorf("enabled: %q", rec.Body.String())
+	}
 	for _, tc := range []struct{ method, path string }{
 		{"POST", "/QuickConnect/Initiate"}, {"GET", "/QuickConnect/Connect?Secret=x"}, {"POST", "/Users/AuthenticateWithQuickConnect"},
+		{"POST", "/QuickConnect/Authorize?code=123456"},
 	} {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest(tc.method, tc.path, nil))
 		if rec.Code != http.StatusUnauthorized || !strings.Contains(rec.Body.String(), "Quick connect is disabled") {
 			t.Errorf("%s %s: %d %q", tc.method, tc.path, rec.Code, rec.Body.String())
 		}
+	}
+}
+
+func TestQuickConnect(t *testing.T) {
+	s := newTestServer(t, nil)
+	s.QuickConnect = &quickconnect.Service{}
+	anna := addUser(t, s, "anna", "pw", false)
+	addUser(t, s, "admin", "pw", true)
+	h := s.Handler()
+	if rec := get(t, h, "/QuickConnect/Enabled", nil); strings.TrimSpace(rec.Body.String()) != "true" {
+		t.Errorf("enabled: %q", rec.Body.String())
+	}
+
+	// The app asks for a code and polls.
+	app := &apiClient{t: t, h: h}
+	q := decode[QuickConnectResult](t, app.do("POST", "/QuickConnect/Initiate", "", nil))
+	if len(q.Code) != 6 || q.Secret == "" || q.Authenticated || q.AppName != "Moonfin" {
+		t.Fatalf("initiate: %+v", q)
+	}
+	if rec := app.do("GET", "/QuickConnect/Connect?secret=nope", "", nil); rec.Code != http.StatusNotFound {
+		t.Errorf("unknown secret: %d", rec.Code)
+	}
+	if rec := app.do("POST", "/Users/AuthenticateWithQuickConnect", `{"Secret":"`+q.Secret+`"}`, nil); rec.Code != http.StatusUnauthorized {
+		t.Errorf("token before confirmation: %d", rec.Code)
+	}
+
+	// Anna confirms it from another client; she may not confirm for others.
+	phone := &apiClient{t: t, h: h}
+	login(t, phone, "anna", "pw")
+	if rec := phone.do("POST", "/QuickConnect/Authorize?code=000000", "", nil); rec.Code != http.StatusNotFound {
+		t.Errorf("wrong code: %d", rec.Code)
+	}
+	adminID := ""
+	if u, err := s.Store.UserByName(t.Context(), "admin"); err == nil {
+		adminID = u.ID
+	}
+	if rec := phone.do("POST", "/QuickConnect/Authorize?code="+q.Code+"&userId="+adminID, "", nil); rec.Code != http.StatusForbidden {
+		t.Errorf("for another user: %d", rec.Code)
+	}
+	if rec := phone.do("POST", "/QuickConnect/Authorize?code="+q.Code, "", nil); rec.Code != 200 || strings.TrimSpace(rec.Body.String()) != "true" {
+		t.Fatalf("authorize: %d %q", rec.Code, rec.Body.String())
+	}
+	if st := decode[QuickConnectResult](t, app.do("GET", "/QuickConnect/Connect?Secret="+q.Secret, "", nil)); !st.Authenticated {
+		t.Errorf("status after confirmation: %+v", st)
+	}
+	res := decode[AuthenticationResult](t, app.do("POST", "/Users/AuthenticateWithQuickConnect", `{"Secret":"`+q.Secret+`"}`, nil))
+	if res.AccessToken == "" || normalizeID(res.User.ID) != anna.ID {
+		t.Fatalf("authenticate: %+v", res)
+	}
+	app.token = res.AccessToken
+	if rec := app.do("GET", "/Users/Me", "", nil); rec.Code != 200 {
+		t.Errorf("token of quick connect: %d", rec.Code)
+	}
+	if rec := app.do("POST", "/Users/AuthenticateWithQuickConnect", `{"Secret":"`+q.Secret+`"}`, nil); rec.Code != http.StatusUnauthorized {
+		t.Errorf("secret used twice: %d", rec.Code)
 	}
 }
 

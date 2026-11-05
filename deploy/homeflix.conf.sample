@@ -10,6 +10,11 @@
 #discovery			# answer clients searching the network; or: no discovery
 #trusted proxy { 192.168.1.2, 127.0.0.1 }	# Caddy, tailscale serve; default: none
 #admin from { 192.168.0.0/16, 100.64.0.0/10 }	# default: loopback, private, tailnet
+#passkeys {					# HTTPS addresses of the web client; default: none
+#	origin "https://homeflix.example.ts.net"
+#	origin "https://kino.example.de"
+#}
+#quickconnect			# apps sign in with a code; or: no quickconnect
 #data directory "/var/db/homeflix"
 #log level info			# debug logs every request
 #language en			# audio and subtitle titles: en or de

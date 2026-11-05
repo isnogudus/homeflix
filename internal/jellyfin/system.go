@@ -54,20 +54,13 @@ type SystemInfo struct {
 	HardwareAccelerationRequiresPremiere bool   `json:"HardwareAccelerationRequiresPremiere"`
 }
 
-// QuickConnect is not offered: homeflix signs in with name and password only.
-const quickConnectEnabled = false
-
 func (s *Server) registerSystem(rt *Router) {
 	rt.HandleFunc(http.MethodGet, "/System/Info/Public", s.publicSystemInfo)
 	rt.HandleFunc(http.MethodGet, "/System/Info", s.authed(s.systemInfo))
 	rt.HandleFunc(http.MethodGet, "/System/Ping", s.ping)
 	rt.HandleFunc(http.MethodPost, "/System/Ping", s.ping)
 	rt.HandleFunc(http.MethodGet, "/Branding/Configuration", s.brandingConfiguration)
-	rt.HandleFunc(http.MethodGet, "/QuickConnect/Enabled", s.quickConnectEnabled)
-	rt.HandleFunc(http.MethodPost, "/QuickConnect/Initiate", quickConnectDisabled)
-	rt.HandleFunc(http.MethodGet, "/QuickConnect/Connect", quickConnectDisabled)
-	rt.HandleFunc(http.MethodPost, "/QuickConnect/Authorize", quickConnectDisabled)
-	rt.HandleFunc(http.MethodPost, "/Users/AuthenticateWithQuickConnect", quickConnectDisabled)
+	s.registerQuickConnect(rt)
 	rt.HandleFunc(http.MethodGet, "/System/Configuration/{key}", s.authed(s.namedConfiguration))
 	// homeflix has no plugins.
 	rt.HandleFunc(http.MethodGet, "/Plugins", s.authed(func(w http.ResponseWriter, r *http.Request, _ *Session) {
@@ -115,12 +108,6 @@ func (s *Server) namedConfiguration(w http.ResponseWriter, r *http.Request, sess
 	})
 }
 
-// quickConnectDisabled answers as Jellyfin does with QuickConnect off, so
-// clients tell the user instead of reporting an unknown error.
-func quickConnectDisabled(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "Quick connect is disabled", http.StatusUnauthorized)
-}
-
 func (s *Server) publicInfo(r *http.Request) PublicSystemInfo {
 	return PublicSystemInfo{
 		LocalAddress:           localAddress(r),
@@ -145,10 +132,6 @@ func (s *Server) systemInfo(w http.ResponseWriter, r *http.Request, sess *Sessio
 		CastReceiverApplications:   []any{},
 		SystemArchitecture:         runtime.GOARCH,
 	})
-}
-
-func (s *Server) quickConnectEnabled(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, quickConnectEnabled)
 }
 
 func (s *Server) ping(w http.ResponseWriter, r *http.Request) {

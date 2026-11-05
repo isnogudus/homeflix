@@ -111,7 +111,8 @@ func (s *Server) loginPage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, nextPage(r.URL.Query().Get("next")), http.StatusFound)
 		return
 	}
-	s.render(w, r, http.StatusOK, "login", nil, map[string]any{"Next": nextPage(r.URL.Query().Get("next"))})
+	s.render(w, r, http.StatusOK, "login", nil, map[string]any{"Next": nextPage(r.URL.Query().Get("next")),
+		"Passkeys": s.passkeyOrigin(r) != ""})
 }
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
@@ -121,7 +122,8 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	next := nextPage(r.PostFormValue("next"))
 	remote := clientaddr.From(r).String()
 	again := func(status int, msg string) {
-		s.render(w, r, status, "login", nil, map[string]any{"Next": next, "Username": name, "Error": msg})
+		s.render(w, r, status, "login", nil, map[string]any{"Next": next, "Username": name, "Error": msg,
+			"Passkeys": s.passkeyOrigin(r) != ""})
 	}
 	if name == "" {
 		again(http.StatusBadRequest, "loginMissing")
@@ -167,31 +169,39 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	if s.Logins != nil {
 		s.Logins.Succeeded(name)
 	}
-	raw, err := auth.NewToken()
-	if err != nil {
+	if err := s.startSession(w, r, user, "password"); err != nil {
 		s.fail(w, err)
 		return
+	}
+	http.Redirect(w, r, next, http.StatusSeeOther)
+}
+
+// startSession signs user in on this browser: a token for a new device
+// and the cookie that carries it.
+func (s *Server) startSession(w http.ResponseWriter, r *http.Request, user store.User, method string) error {
+	raw, err := auth.NewToken()
+	if err != nil {
+		return err
 	}
 	sessionID, err := store.NewID()
 	if err != nil {
-		s.fail(w, err)
-		return
+		return err
 	}
 	deviceID, err := store.NewID()
 	if err != nil {
-		s.fail(w, err)
-		return
+		return err
 	}
 	now := time.Now().UTC()
 	tok := store.Token{Hash: auth.HashToken(raw), SessionID: sessionID, UserID: user.ID, DeviceID: deviceID,
-		DeviceName: deviceName(r.UserAgent()), Client: clientName, RemoteAddr: remote, CreatedAt: now, LastSeenAt: now}
+		DeviceName: deviceName(r.UserAgent()), Client: clientName, RemoteAddr: clientaddr.From(r).String(),
+		CreatedAt: now, LastSeenAt: now}
 	if err := s.Store.CreateToken(r.Context(), tok); err != nil {
-		s.fail(w, err)
-		return
+		return err
 	}
-	s.Log.Info("login", "user", user.Name, "client", clientName, "device", tok.DeviceName, "remote", remote)
+	s.Log.Info("login", "user", user.Name, "client", clientName, "device", tok.DeviceName, "remote", tok.RemoteAddr,
+		"method", method)
 	http.SetCookie(w, s.cookie(r, raw, sessionLifetime))
-	http.Redirect(w, r, next, http.StatusSeeOther)
+	return nil
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request, sess *session) {

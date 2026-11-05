@@ -21,6 +21,7 @@ import (
 	"homeflix/internal/clientaddr"
 	"homeflix/internal/images"
 	"homeflix/internal/lockout"
+	"homeflix/internal/quickconnect"
 	"homeflix/internal/store"
 	"homeflix/internal/subtitles"
 )
@@ -56,6 +57,8 @@ type Server struct {
 	Catalog     *catalog.Catalog
 	Images      *images.Service
 	Subtitles   *subtitles.Service
+	// QuickConnect signs apps in with a code; nil turns it off.
+	QuickConnect *quickconnect.Service
 	// Shutdown ends long-lived connections such as WebSockets, which
 	// http.Server.Shutdown does not wait for.
 	Shutdown context.Context

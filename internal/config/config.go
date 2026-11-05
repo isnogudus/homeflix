@@ -3,11 +3,13 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"net/netip"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -57,6 +59,13 @@ type Config struct {
 	TrustedProxies []netip.Prefix
 	// AdminFrom are the networks the admin UI answers from.
 	AdminFrom []netip.Prefix
+	// PasskeyOrigins are the HTTPS origins the web client offers passkeys
+	// on, such as "https://homeflix.example.ts.net"; each origin's host is
+	// its own relying party.
+	PasskeyOrigins []string
+	// QuickConnect lets Jellyfin apps sign in with a code confirmed in the
+	// web client.
+	QuickConnect bool
 
 	Libraries []Library
 
@@ -111,6 +120,7 @@ func Default() Config {
 		SortArticles:     []string{"the", "a", "an"},
 		DisplayLanguage:  "en",
 		Discovery:        true,
+		QuickConnect:     true,
 		AdminFrom:        DefaultAdminFrom(),
 	}
 }
@@ -129,8 +139,8 @@ func DefaultAdminFrom() []netip.Prefix {
 
 var keywords = []string{
 	"admin", "articles", "data", "directory", "discovery", "ffmpeg", "ffprobe", "file", "from", "image",
-	"interval", "language", "level", "library", "listen", "log", "name", "no", "on", "path",
-	"port", "probe", "proxy", "refresh", "scan", "server", "sort", "tmdb", "token", "transcode", "trusted", "workers",
+	"interval", "language", "level", "library", "listen", "log", "name", "no", "on", "origin", "passkeys", "path",
+	"port", "probe", "proxy", "quickconnect", "refresh", "scan", "server", "sort", "tmdb", "token", "transcode", "trusted", "workers",
 }
 
 // Load reads the configuration file at path; "-" reads standard input. On
@@ -379,6 +389,17 @@ func (p *parser) statement() bool {
 	case p.Accept("no", "trusted", "proxy"):
 		p.cfg.TrustedProxies = nil
 		return p.once("trusted proxy", t.Pos)
+	case p.Is("passkeys"):
+		return p.passkeys()
+	case p.Accept("no", "passkeys"):
+		p.cfg.PasskeyOrigins = nil
+		return p.once("passkeys", t.Pos)
+	case p.Accept("quickconnect"):
+		p.cfg.QuickConnect = true
+		return p.once("quickconnect", t.Pos)
+	case p.Accept("no", "quickconnect"):
+		p.cfg.QuickConnect = false
+		return p.once("quickconnect", t.Pos)
 	case p.Accept("admin", "from"):
 		if !p.once("admin from", t.Pos) {
 			return false
@@ -500,6 +521,69 @@ func (p *parser) library() bool {
 	}
 	p.cfg.Libraries = append(p.cfg.Libraries, lib)
 	return true
+}
+
+// passkeys parses passkeys { origin URL ... }.
+func (p *parser) passkeys() bool {
+	kw := p.Tok()
+	if !p.once("passkeys", kw.Pos) {
+		return false
+	}
+	p.Next()
+	var origins []string
+	errsBefore := len(p.Errors())
+	ok := p.Block("passkeys", func() bool {
+		if !p.Accept("origin") {
+			p.Errorf(p.Tok().Pos, "unknown statement %q in passkeys block", p.Tok().Text)
+			return false
+		}
+		pos := p.Tok().Pos
+		v, ok := p.Text("origin such as https://homeflix.example.ts.net")
+		if !ok {
+			return false
+		}
+		origin, err := passkeyOrigin(v)
+		if err != nil {
+			p.Errorf(pos, "origin %q: %v", v, err)
+			return false
+		}
+		for _, o := range origins {
+			if o == origin {
+				p.Errorf(pos, "origin %q given twice", v)
+				return false
+			}
+		}
+		origins = append(origins, origin)
+		return true
+	})
+	if !ok || len(p.Errors()) > errsBefore {
+		return false
+	}
+	if len(origins) == 0 {
+		p.Errorf(kw.Pos, "passkeys block has no origin")
+		return false
+	}
+	p.cfg.PasskeyOrigins = origins
+	return true
+}
+
+// passkeyOrigin checks and normalizes an origin passkeys are offered on:
+// browsers allow them only over HTTPS, and on http://localhost.
+func passkeyOrigin(v string) (string, error) {
+	u, err := url.Parse(v)
+	switch {
+	case err != nil:
+		return "", err
+	case u.Host == "" || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "":
+		return "", errors.New("want scheme and host only, such as https://homeflix.example.ts.net")
+	case u.Scheme == "http" && u.Hostname() != "localhost":
+		return "", errors.New("passkeys need HTTPS, except on http://localhost")
+	case u.Scheme != "https" && u.Scheme != "http":
+		return "", errors.New("want an https URL")
+	case net.ParseIP(u.Hostname()) != nil:
+		return "", errors.New("passkeys need a domain name, not an address")
+	}
+	return strings.ToLower(u.Scheme + "://" + u.Host), nil
 }
 
 // SlogLevel converts LogLevel to a slog.Level.

@@ -57,6 +57,11 @@ scan interval 1h30m
 sort articles { The, der die das }
 trusted proxy { 192.168.1.2, 127.0.0.1 }
 admin from { 192.168.1.0/24, 100.64.0.0/10, fd7a:115c:a1e0::/48 }
+passkeys {
+	origin "https://Homeflix.example.ts.net/"
+	origin "https://kino.example.de:8443"
+}
+no quickconnect
 
 library "Filme" {
 	path $recent
@@ -84,6 +89,7 @@ library Doku { path ${movies}_doku }
 		TrustedProxies:   []netip.Prefix{netip.MustParsePrefix("192.168.1.2/32"), netip.MustParsePrefix("127.0.0.1/32")},
 		AdminFrom: []netip.Prefix{netip.MustParsePrefix("192.168.1.0/24"), netip.MustParsePrefix("100.64.0.0/10"),
 			netip.MustParsePrefix("fd7a:115c:a1e0::/48")},
+		PasskeyOrigins: []string{"https://homeflix.example.ts.net", "https://kino.example.de:8443"},
 		Libraries: []Library{
 			{Name: "Filme", Paths: []string{"/media/movies/recent", "/media/movies/archive", "/srv/neue filme"}},
 			{Name: "Doku", Paths: []string{"/media/movies_doku"}},
@@ -200,6 +206,25 @@ func TestSlogLevel(t *testing.T) {
 	cfg.LogLevel = "debug"
 	if cfg.SlogLevel() != slog.LevelDebug {
 		t.Errorf("SlogLevel() = %v", cfg.SlogLevel())
+	}
+}
+
+func TestPasskeyErrors(t *testing.T) {
+	for src, want := range map[string]string{
+		`passkeys { origin "http://kino.example.de" }`:       "need HTTPS",
+		`passkeys { origin "https://192.168.1.5" }`:          "domain name",
+		`passkeys { origin "https://kino.example.de/web/" }`: "scheme and host only",
+		`passkeys { }`: "no origin",
+		"passkeys {\n origin \"https://a.example\"\n origin \"https://A.example\"\n}": "given twice",
+		`passkeys { name "x" }`: "unknown statement",
+	} {
+		if _, err := parseString(t, src+"\n"); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: want error containing %q, got %v", src, want, err)
+		}
+	}
+	if cfg, err := parseString(t, `passkeys { origin "http://localhost:8096" }`+"\n"); err != nil ||
+		len(cfg.PasskeyOrigins) != 1 || cfg.PasskeyOrigins[0] != "http://localhost:8096" {
+		t.Errorf("localhost: %v %v", cfg.PasskeyOrigins, err)
 	}
 }
 

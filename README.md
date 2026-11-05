@@ -166,7 +166,8 @@ sorting, letters, genres, watched and favourite filters and optional
 grouping into collections; search over movies, people and collections;
 details with cast and crew, versions, audio and subtitle tracks and similar
 movies; collection and person pages; and an account page to change the
-password and sign out devices. The player plays a movie's parts one after
+password, add and remove passkeys, connect apps with Quick Connect and
+sign out devices. The player plays a movie's parts one after
 another and keeps the position in sync with Jellyfin clients, and offers
 the audio tracks of a file. What browsers decode themselves (h264 with AAC
 or MP3 in MP4) plays as it is. Other h264 files, such as MKV with AC3,
@@ -198,6 +199,14 @@ UI and administrative API requests answer only from the networks in
 proxy forwards everything. After 10 failed logins from one address, or 20
 for one user, further logins are refused for 15 minutes, in the web pages
 and the Jellyfin API alike.
+
+Passkeys sign in to the web client without a password. They are offered on
+the HTTPS addresses listed in the `passkeys` block; each address is its own
+relying party, so a passkey added through the tailnet name does not work
+through the Caddy domain, and the account page says which address a passkey
+belongs to. Jellyfin apps cannot use passkeys; they sign in with name and
+password or with Quick Connect: the app shows a code, and a user signed in
+to the web client confirms it on the account page.
 
 ## Users
 
