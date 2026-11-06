@@ -1,6 +1,7 @@
 package jellyfin
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -111,7 +112,7 @@ func TestPlaybackInfo(t *testing.T) {
 }
 
 func TestStreaming(t *testing.T) {
-	_, c, contents := playbackServer(t)
+	s, c, contents := playbackServer(t)
 	token := c.token
 	h := c.h
 	get := func(method, path string, header http.Header) *httptest.ResponseRecorder {
@@ -153,9 +154,23 @@ func TestStreaming(t *testing.T) {
 	if rec := get("GET", "/Videos/"+movieA+"/stream?Static=true", nil); rec.Code != http.StatusUnauthorized {
 		t.Errorf("stream without token: %d", rec.Code)
 	}
+	// Downloads need the right.
+	if rec := get("GET", "/Items/"+movieA+"/Download?ApiKey="+token, nil); rec.Code != http.StatusForbidden {
+		t.Errorf("download without the right: %d", rec.Code)
+	}
+	if item := decode[BaseItemDto](t, c.do("GET", "/Items/"+movieA, "", nil)); item.CanDownload {
+		t.Error("CanDownload without the right")
+	}
+	anna, _ := s.Store.UserByName(context.Background(), "anna")
+	if err := s.Store.SetDownload(context.Background(), anna.ID, true); err != nil {
+		t.Fatal(err)
+	}
 	rec = get("GET", "/Items/"+movieA+"/Download?ApiKey="+token, nil)
 	if rec.Code != 200 || !strings.Contains(rec.Header().Get("Content-Disposition"), "Alpha.mp4") {
 		t.Errorf("download: %d %v", rec.Code, rec.Header())
+	}
+	if item := decode[BaseItemDto](t, c.do("GET", "/Items/"+movieA, "", nil)); !item.CanDownload {
+		t.Error("CanDownload missing with the right")
 	}
 }
 

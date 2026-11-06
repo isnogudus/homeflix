@@ -25,6 +25,7 @@ Subcommands:
   add <name>      create a user (-admin for an administrator)
   passwd <name>   set a new password; signs the user out everywhere
   admin <name>    make a user an administrator (-remove to take it back)
+  download <name> let a user download original files (-remove to take it back)
   conversion <name> none|audio|all
                   how far the server may convert movies for the user:
                   not at all, the audio only (remux), or the video too
@@ -59,6 +60,8 @@ func userCommand(args []string, cio cliIO) error {
 		fs.BoolVar(&admin, "admin", false, "make the user an administrator")
 	case "admin":
 		fs.BoolVar(&remove, "remove", false, "take administrator rights back")
+	case "download":
+		fs.BoolVar(&remove, "remove", false, "take the download right back")
 	}
 	names, err := parseInterspersed(fs, args[1:])
 	if err != nil {
@@ -72,7 +75,7 @@ func userCommand(args []string, cio cliIO) error {
 		wantNames = 2
 	}
 	switch sub {
-	case "add", "passwd", "admin", "conversion", "delete", "list":
+	case "add", "passwd", "admin", "download", "conversion", "delete", "list":
 	default:
 		fmt.Fprint(cio.stderr, userUsage)
 		return fmt.Errorf("unknown user subcommand %q", sub)
@@ -146,6 +149,19 @@ func userCommand(args []string, cio cliIO) error {
 		} else {
 			fmt.Fprintf(cio.stdout, "%q is an administrator\n", u.Name)
 		}
+	case "download":
+		u, err := db.UserByName(ctx, names[0])
+		if err != nil {
+			return fmt.Errorf("user %q: %w", names[0], err)
+		}
+		if err := db.SetDownload(ctx, u.ID, !remove); err != nil {
+			return err
+		}
+		if remove {
+			fmt.Fprintf(cio.stdout, "%q may not download any more\n", u.Name)
+		} else {
+			fmt.Fprintf(cio.stdout, "%q may download\n", u.Name)
+		}
 	case "conversion":
 		c := store.Conversion(names[1])
 		if !c.Valid() {
@@ -204,15 +220,19 @@ func listUsers(ctx context.Context, db *store.Store, w io.Writer) error {
 		byUser[t.UserID] = append(byUser[t.UserID], t)
 	}
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tROLE\tCONVERSION\tLAST LOGIN\tSESSIONS")
+	fmt.Fprintln(tw, "NAME\tROLE\tCONVERSION\tDOWNLOAD\tLAST LOGIN\tSESSIONS")
 	for _, u := range users {
 		role := "user"
 		if u.IsAdmin {
 			role = "admin"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\n", u.Name, role, u.Conversion, formatTime(u.LastLoginAt), len(byUser[u.ID]))
+		download := "no"
+		if u.CanDownload {
+			download = "yes"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%d\n", u.Name, role, u.Conversion, download, formatTime(u.LastLoginAt), len(byUser[u.ID]))
 		for _, t := range byUser[u.ID] {
-			fmt.Fprintf(tw, "  %s %s on %s\t\t\tlast seen %s\tfrom %s\n",
+			fmt.Fprintf(tw, "  %s %s on %s\t\t\t\tlast seen %s\tfrom %s\n",
 				t.Client, t.ClientVersion, t.DeviceName, formatTime(t.LastSeenAt), t.RemoteAddr)
 		}
 	}

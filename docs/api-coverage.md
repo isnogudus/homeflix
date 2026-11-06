@@ -88,7 +88,7 @@ caches that send no credentials.
 |---|---|---|
 | `GET\|POST /Items/{itemId}/PlaybackInfo` | yes | evaluates the device profile like Jellyfin's StreamBuilder; direct play only, no transcoding |
 | `GET /Videos/{itemId}/stream[.{container}]` | yes | the original file with range requests; remux and transcode parameters are ignored |
-| `GET /Items/{itemId}/Download` | yes | the original file as an attachment |
+| `GET /Items/{itemId}/Download` | yes | the original file as an attachment, for users with the download right (403 otherwise) |
 | `GET /Videos/{itemId}/AdditionalParts` | yes | later parts of a multi-part movie |
 | `GET /Videos/{itemId}/{mediaSourceId}/Subtitles/{index}[/{startTicks}]/Stream.{format}` | yes | embedded text subtitles such as SubRip, ASS or mov_text, as `srt`, `vtt`, `ass` or `ssa`; see below |
 

@@ -180,6 +180,10 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request, sess *Session) {
 }
 
 func (s *Server) download(w http.ResponseWriter, r *http.Request, sess *Session) {
+	if !sess.User.CanDownload {
+		http.Error(w, "this account may not download files", http.StatusForbidden)
+		return
+	}
 	s.serveFile(w, r, sess, true)
 }
 

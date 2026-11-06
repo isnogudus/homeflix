@@ -67,6 +67,15 @@
 			<button>{{t "save"}}</button>
 		</form>
 	</section>
+	<section class="card">
+		<h2>{{t "download"}}</h2>
+		<form class="stack" method="post" action="/admin/users/{{.ID}}/download">
+			{{template "csrf" $}}
+			<label class="check"><input type="checkbox" name="download"{{if .CanDownload}} checked{{end}}> {{t "downloadRight"}}</label>
+			<p class="note">{{t "downloadNote"}}</p>
+			<button>{{t "save"}}</button>
+		</form>
+	</section>
 	{{if not $.Data.Self}}
 	<section class="card">
 		<h2>{{t "deleteUser"}}</h2>

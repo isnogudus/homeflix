@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -30,6 +31,7 @@ func (s *Server) registerClient(mux *http.ServeMux) {
 	mux.HandleFunc("GET /web/search", s.signedIn(s.search))
 	mux.HandleFunc("GET /web/play/{id}", s.signedIn(s.play))
 	mux.HandleFunc("GET /web/stream/{file}", s.signedIn(s.stream))
+	mux.HandleFunc("GET /web/download/{file}", s.signedIn(s.download))
 	mux.HandleFunc("GET /web/subtitles/{file}/{index}", s.signedIn(s.subtitleTrack))
 	mux.HandleFunc("POST /web/progress", s.signedIn(s.progress))
 	mux.HandleFunc("GET /web/hls/{file}/{audio}/index.m3u8", s.signedIn(s.hlsPlaylist))
@@ -295,6 +297,13 @@ type personCard struct {
 	URL, Image, Name, Role string
 }
 
+// download is a file of the shown version, for users allowed to download.
+type download struct {
+	URL, Name string
+	Size      int64
+	Part      int
+}
+
 // versionView is a version a movie can be played in.
 type versionView struct {
 	Label, URL string
@@ -409,6 +418,13 @@ func (s *Server) movie(w http.ResponseWriter, r *http.Request, sess *session) {
 	d["Audio"], d["Subtitles"] = audio, subs
 	if a := defaultAudio(info); a != nil {
 		d["PlaysAudio"] = a.DisplayTitle
+	}
+	if sess.User.CanDownload {
+		var dl []download
+		for i, p := range version.Parts {
+			dl = append(dl, download{URL: "/web/download/" + p.File.ID, Name: filepath.Base(p.File.Path), Size: p.File.Size, Part: i + 1})
+		}
+		d["Downloads"] = dl
 	}
 	mode, play := s.playable(version.Parts[0], sess.User.Conversion)
 	d["Play"], d["Playable"], d["Remux"] = play, mode != "", mode == "hls"

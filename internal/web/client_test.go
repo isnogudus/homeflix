@@ -338,3 +338,30 @@ func TestDirectPlayWithoutConversion(t *testing.T) {
 		t.Errorf("part without conversion: %v", part)
 	}
 }
+
+func TestDownload(t *testing.T) {
+	f, c, contents := clientFixture(t)
+	if body := f.do(lan, "GET", "/web/movies/"+slaveID, nil, c).Body.String(); strings.Contains(body, "/web/download/") {
+		t.Error("download link without the right")
+	}
+	if rec := f.do(lan, "GET", "/web/download/f1", nil, c); rec.Code != http.StatusForbidden {
+		t.Errorf("download without the right: %d", rec.Code)
+	}
+	if err := f.db.SetDownload(context.Background(), f.user("anna").ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if body := f.do(lan, "GET", "/web/movies/"+splitID, nil, c).Body.String(); !strings.Contains(body, `href="/web/download/f3" download>beta part1.mp4</a>`) ||
+		!strings.Contains(body, "/web/download/f4") {
+		t.Errorf("download links: %s", body)
+	}
+	rec := f.do(lan, "GET", "/web/download/f1", nil, c)
+	if rec.Code != 200 || rec.Body.String() != contents["f1"] || !strings.Contains(rec.Header().Get("Content-Disposition"), `attachment; filename=slave.mp4`) {
+		t.Errorf("download: %d %v", rec.Code, rec.Header())
+	}
+	if rec := f.do(lan, "GET", "/web/download/nope", nil, c); rec.Code != http.StatusNotFound {
+		t.Errorf("download of an unknown file: %d", rec.Code)
+	}
+	if rec := f.do(lan, "GET", "/web/download/f1", nil, nil); rec.Code != http.StatusFound {
+		t.Errorf("download without session: %d", rec.Code)
+	}
+}

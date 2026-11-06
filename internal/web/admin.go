@@ -44,6 +44,7 @@ func (s *Server) registerAdmin(mux *http.ServeMux) {
 	mux.HandleFunc("POST /admin/users/{id}/password", admin(s.adminSetPassword))
 	mux.HandleFunc("POST /admin/users/{id}/admin", admin(s.adminSetAdmin))
 	mux.HandleFunc("POST /admin/users/{id}/conversion", admin(s.adminSetConversion))
+	mux.HandleFunc("POST /admin/users/{id}/download", admin(s.adminSetDownload))
 	mux.HandleFunc("POST /admin/users/{id}/delete", admin(s.adminDeleteUser))
 	mux.HandleFunc("POST /admin/users/{id}/sessions/{session}/end", admin(s.adminEndSession))
 	mux.HandleFunc("POST /admin/users/{id}/passkeys/{cred}/delete", admin(s.adminDeletePasskey))
@@ -315,6 +316,20 @@ func (s *Server) adminSetAdmin(w http.ResponseWriter, r *http.Request, sess *ses
 	}
 	s.Log.Info("admin rights changed", "user", u.Name, "admin", admin, "by", sess.User.Name)
 	back(w, r, "/admin/users/"+u.ID, "ok", "rightsChanged")
+}
+
+func (s *Server) adminSetDownload(w http.ResponseWriter, r *http.Request, sess *session) {
+	u, ok := s.targetUser(w, r)
+	if !ok {
+		return
+	}
+	download := r.PostFormValue("download") == "on"
+	if err := s.Store.SetDownload(r.Context(), u.ID, download); err != nil {
+		s.fail(w, err)
+		return
+	}
+	s.Log.Info("download right changed", "user", u.Name, "download", download, "by", sess.User.Name)
+	back(w, r, "/admin/users/"+u.ID, "ok", "downloadChanged")
 }
 
 // conversionOption is one choice of a user's conversion level.

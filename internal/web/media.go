@@ -3,6 +3,7 @@ package web
 import (
 	"errors"
 	"fmt"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -195,6 +196,20 @@ var contentTypes = map[string]string{".mp4": "video/mp4", ".m4v": "video/mp4", "
 
 // stream serves a file of a movie for the player, with ranges for seeking.
 func (s *Server) stream(w http.ResponseWriter, r *http.Request, sess *session) {
+	s.serveFile(w, r, sess, false)
+}
+
+// download serves a file of a movie as an attachment, to users with the
+// right to download.
+func (s *Server) download(w http.ResponseWriter, r *http.Request, sess *session) {
+	if !sess.User.CanDownload {
+		http.Error(w, "this account may not download files", http.StatusForbidden)
+		return
+	}
+	s.serveFile(w, r, sess, true)
+}
+
+func (s *Server) serveFile(w http.ResponseWriter, r *http.Request, sess *session, attachment bool) {
 	if s.Catalog == nil {
 		http.NotFound(w, r)
 		return
@@ -221,7 +236,13 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request, sess *session) {
 	if ct == "" {
 		ct = "application/octet-stream"
 	}
-	if r.Header.Get("Range") == "" || strings.HasPrefix(r.Header.Get("Range"), "bytes=0-") {
+	switch {
+	case attachment:
+		w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filepath.Base(path)}))
+		if r.Header.Get("Range") == "" {
+			s.Log.Info("download", "item", ref.Movie.Title, "part", ref.Index+1, "user", sess.User.Name, "client", clientName)
+		}
+	case r.Header.Get("Range") == "" || strings.HasPrefix(r.Header.Get("Range"), "bytes=0-"):
 		s.Log.Info("stream", "item", ref.Movie.Title, "part", ref.Index+1, "user", sess.User.Name, "client", clientName)
 	}
 	w.Header().Set("Content-Type", ct)

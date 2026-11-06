@@ -8,6 +8,8 @@ import (
 	"html/template"
 	"io/fs"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -77,6 +79,18 @@ func funcs(lang string) template.FuncMap {
 				m[fmt.Sprint(kv[i])] = kv[i+1]
 			}
 			return m
+		},
+		// size writes a file size in GB, or MB below one GB.
+		"size": func(n int64) string {
+			v, unit := float64(n)/1e9, "GB"
+			if v < 1 {
+				v, unit = float64(n)/1e6, "MB"
+			}
+			out := strconv.FormatFloat(v, 'f', 1, 64)
+			if lang == "de" {
+				out = strings.Replace(out, ".", ",", 1)
+			}
+			return out + " " + unit
 		},
 		"secs": func(d time.Duration) string {
 			if d < time.Second {

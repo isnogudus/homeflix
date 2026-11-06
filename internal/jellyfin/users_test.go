@@ -325,3 +325,9 @@ func TestPolicyConversion(t *testing.T) {
 		}
 	}
 }
+
+func TestPolicyDownload(t *testing.T) {
+	if policyFor(store.User{}).EnableContentDownloading || !policyFor(store.User{CanDownload: true}).EnableContentDownloading {
+		t.Error("EnableContentDownloading does not follow the right")
+	}
+}

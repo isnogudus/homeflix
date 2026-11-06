@@ -89,6 +89,12 @@ func TestUserCommands(t *testing.T) {
 	if _, err := user("", "admin", "nobody"); err == nil {
 		t.Error("admin of an unknown user: want error")
 	}
+	if out, err := user("", "download", "bert"); err != nil || !strings.Contains(out, `"bert" may download`) {
+		t.Errorf("download: %q, %v", out, err)
+	}
+	if out, err := user("", "download", "-remove", "bert"); err != nil || !strings.Contains(out, "may not download any more") {
+		t.Errorf("download -remove: %q, %v", out, err)
+	}
 	if out, err := user("", "conversion", "bert", "audio"); err != nil || !strings.Contains(out, `"bert": conversion audio`) {
 		t.Errorf("conversion: %q, %v", out, err)
 	}

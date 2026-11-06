@@ -22,6 +22,7 @@ type User struct {
 	PasswordHash   string
 	IsAdmin        bool
 	Conversion     Conversion
+	CanDownload    bool   // may download the original files
 	Configuration  string // JSON object as last sent by a client
 	CreatedAt      time.Time
 	LastLoginAt    time.Time // zero if never
@@ -88,12 +89,12 @@ func isUniqueViolation(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
 }
 
-const userColumns = "id, name, password_hash, is_admin, conversion, configuration, created_at, last_login_at, last_activity_at"
+const userColumns = "id, name, password_hash, is_admin, conversion, can_download, configuration, created_at, last_login_at, last_activity_at"
 
 func scanUser(row interface{ Scan(...any) error }) (User, error) {
 	var u User
 	var created, login, activity sql.NullInt64
-	err := row.Scan(&u.ID, &u.Name, &u.PasswordHash, &u.IsAdmin, &u.Conversion, &u.Configuration, &created, &login, &activity)
+	err := row.Scan(&u.ID, &u.Name, &u.PasswordHash, &u.IsAdmin, &u.Conversion, &u.CanDownload, &u.Configuration, &created, &login, &activity)
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
@@ -192,6 +193,11 @@ func (s *Store) SetConversion(ctx context.Context, userID string, c Conversion) 
 		return fmt.Errorf("conversion %q: want none, audio or all", c)
 	}
 	return expectOne(s.db.ExecContext(ctx, "UPDATE users SET conversion = ? WHERE id = ?", string(c), userID))
+}
+
+// SetDownload grants or removes the right to download original files.
+func (s *Store) SetDownload(ctx context.Context, userID string, download bool) error {
+	return expectOne(s.db.ExecContext(ctx, "UPDATE users SET can_download = ? WHERE id = ?", download, userID))
 }
 
 // DeleteUser removes a user together with its tokens and preferences.

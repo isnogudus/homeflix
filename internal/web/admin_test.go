@@ -146,6 +146,13 @@ func TestAdminUsers(t *testing.T) {
 		f.user("anna").Conversion != store.ConversionNone {
 		t.Errorf("conversion none: %v %q", rec.Header(), f.user("anna").Conversion)
 	}
+	if rec := f.post("/admin/users/"+anna.ID+"/download", c, url.Values{"download": {"on"}}); !strings.HasSuffix(rec.Header().Get("Location"), "ok=downloadChanged") ||
+		!f.user("anna").CanDownload {
+		t.Errorf("download on: %v", rec.Header())
+	}
+	if f.post("/admin/users/"+anna.ID+"/download", c, url.Values{}); f.user("anna").CanDownload {
+		t.Error("download right not removed")
+	}
 	if rec := f.post("/admin/users/"+anna.ID+"/conversion", c, url.Values{"conversion": {"video"}}); !strings.HasSuffix(rec.Header().Get("Location"), "err=conversionInvalid") ||
 		f.user("anna").Conversion != store.ConversionNone {
 		t.Errorf("invalid conversion: %v", rec.Header())

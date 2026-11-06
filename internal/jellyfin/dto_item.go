@@ -343,7 +343,6 @@ func (s *Server) baseDto(m *catalog.Movie, id string) BaseItemDto {
 		ServerID:          s.ServerID,
 		ID:                id,
 		DateCreated:       timePtr(m.DateCreated),
-		CanDownload:       true,
 		SortName:          m.SortTitle,
 		ExternalUrls:      []ExternalURL{},
 		Taglines:          []string{},
@@ -456,6 +455,7 @@ func (s *Server) itemDto(m *catalog.Movie, fields fieldSet, sess *Session, user 
 		return s.collectionDto(m.Set, fields, user)
 	}
 	d := s.baseDto(m, m.ID)
+	d.CanDownload = sess != nil && sess.User.CanDownload
 	describeMeta(&d, m, fields, s.Catalog.Snapshot())
 	d.UserData = userDataDto(m.ID, user[m.ID], runtimeOf(m))
 	for _, x := range m.Extras {
@@ -500,6 +500,7 @@ func (s *Server) partDto(r catalog.PartRef, fields fieldSet, sess *Session, user
 	part := r.Part()
 	id := part.File.ID
 	d := s.baseDto(r.Movie, id)
+	d.CanDownload = sess != nil && sess.User.CanDownload
 	describeMeta(&d, r.Movie, fields, s.Catalog.Snapshot())
 	d.Name = r.Movie.Name() + " – " + s.Catalog.Locale.PartName(r.Index+1)
 	d.UserData = userDataDto(id, user[id], part.Info.Duration)

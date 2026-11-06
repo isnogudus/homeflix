@@ -88,7 +88,7 @@ func policyFor(u store.User) UserPolicy {
 		EnableAudioPlaybackTranscoding:   u.Conversion.Remux(),
 		EnableVideoPlaybackTranscoding:   u.Conversion.Transcode(),
 		EnableContentDeletionFromFolders: []string{},
-		EnableContentDownloading:         true,
+		EnableContentDownloading:         u.CanDownload,
 		EnabledDevices:                   []string{},
 		EnableAllDevices:                 true,
 		EnabledChannels:                  []string{},

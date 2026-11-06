@@ -154,6 +154,18 @@ func TestAdminFlagAndSessions(t *testing.T) {
 	if err := s.SetConversion(ctx, "nobody", ConversionAudio); !errors.Is(err, ErrNotFound) {
 		t.Errorf("conversion of unknown user: %v", err)
 	}
+	if u.CanDownload {
+		t.Error("new user may download")
+	}
+	if err := s.SetDownload(ctx, u.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.UserByID(ctx, u.ID); !got.CanDownload {
+		t.Error("download right not set")
+	}
+	if err := s.SetDownload(ctx, "nobody", true); !errors.Is(err, ErrNotFound) {
+		t.Errorf("download right of unknown user: %v", err)
+	}
 	now := time.Now().UTC()
 	for _, id := range []string{"s1", "s2"} {
 		if err := s.CreateToken(ctx, Token{Hash: "h" + id, SessionID: id, UserID: u.ID, DeviceID: "d" + id,

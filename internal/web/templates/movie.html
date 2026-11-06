@@ -31,6 +31,7 @@
 		<dl class="tracks">
 			{{with .Data.Audio}}<dt>{{t "audio"}}</dt><dd>{{range $i, $a := .}}{{if $i}}, {{end}}{{$a}}{{end}}{{if $.Data.Remux}}<br><span class="note">{{t "remuxNote"}}</span>{{else}}{{with $.Data.PlaysAudio}}<br><span class="note">{{t "browserPlays"}}: {{.}}</span>{{end}}{{end}}</dd>{{end}}
 			{{with .Data.Subtitles}}<dt>{{t "subtitles"}}</dt><dd>{{range $i, $s := .}}{{if $i}}, {{end}}{{$s}}{{end}}</dd>{{end}}
+			{{with .Data.Downloads}}<dt>{{t "download"}}</dt><dd>{{range $i, $f := .}}{{if $i}}<br>{{end}}<a href="{{$f.URL}}" download>{{$f.Name}}</a> <span class="note">({{size $f.Size}})</span>{{end}}</dd>{{end}}
 			{{with .Data.Collection}}<dt>{{t "collection"}}</dt><dd><a href="{{.URL}}">{{.Label}}</a></dd>{{end}}
 		</dl>
 	</div>
