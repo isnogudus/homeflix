@@ -11,6 +11,7 @@
 			<dt>{{t "users"}}</dt><dd><a href="/admin/users">{{.Data.Users}}</a></dd>
 			<dt>{{t "sessions"}}</dt><dd>{{.Data.Sessions}}</dd>
 			{{with .Data.Remuxing}}<dt>{{t "remuxing"}}</dt><dd>{{.}}</dd>{{end}}
+			{{with .Data.Keyframes}}<dt>{{t "keyframes"}}</dt><dd>{{.Indexed}} / {{.Files}}{{with index .BySource "ffprobe"}} ({{.}} {{t "keyframesScanned"}}){{end}}{{if .Failed}}, {{.Failed}} {{t "failed"}}{{end}}{{if .Pending}}, {{.Pending}} {{t "keyframesPending"}}{{end}}</dd>{{end}}
 		</dl>
 	</section>
 	<section class="card">

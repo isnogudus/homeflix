@@ -275,7 +275,7 @@ func TestRemuxPlayback(t *testing.T) {
 	srv := f.server
 	srv.Catalog.Set(catalog.Build([]store.Library{{ID: libID, Name: "Filme", CollectionType: "movies"}}, items, catalog.Options{Locale: "de"}))
 	srv.HLS = &hls.Manager{FFmpeg: "/nonexistent/ffmpeg", Dir: filepath.Join(dir, "hls"), Workers: 1,
-		Keyframes: func(string) ([]time.Duration, error) {
+		Keyframes: func(context.Context, hls.Source) ([]time.Duration, error) {
 			return []time.Duration{0, 6 * time.Second, 12 * time.Second}, nil
 		}}
 

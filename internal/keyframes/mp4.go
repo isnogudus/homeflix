@@ -205,8 +205,7 @@ func videoKeyframes(mem reader, trak box) ([]time.Duration, error) {
 		}
 	}
 	at := func(sample int) time.Duration {
-		pts := max(dts[sample]+offset(sample)-shift, 0)
-		return time.Duration(pts) * time.Second / time.Duration(timescale)
+		return ticks(max(dts[sample]+offset(sample)-shift, 0), timescale)
 	}
 	var times []time.Duration
 	if !hasSync {
@@ -229,4 +228,12 @@ func videoKeyframes(mem reader, trak box) ([]time.Duration, error) {
 		}
 	}
 	return times, nil
+}
+
+// ticks converts a time in units of 1/timescale seconds to a duration.
+// Multiplying first would overflow for long files with a fine timescale:
+// some MP4 writers use one of about two billion per second.
+func ticks(t int64, timescale uint64) time.Duration {
+	ts := int64(timescale)
+	return time.Duration(t/ts)*time.Second + time.Duration(t%ts*int64(time.Second)/ts)
 }

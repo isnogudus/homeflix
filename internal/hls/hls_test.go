@@ -87,9 +87,10 @@ func firstVideoPTS(t *testing.T, path string) float64 {
 
 func TestRemux(t *testing.T) {
 	ffmpeg, path := testMovie(t)
-	m := &Manager{FFmpeg: ffmpeg, Dir: filepath.Join(t.TempDir(), "hls"), Workers: 1, Keyframes: keyframes.Read}
+	m := &Manager{FFmpeg: ffmpeg, Dir: filepath.Join(t.TempDir(), "hls"), Workers: 1,
+		Keyframes: func(_ context.Context, s Source) ([]time.Duration, error) { return keyframes.Read(s.Path) }}
 	src := Source{Key: "movie", Path: path, Duration: sec(40), Audio: 1}
-	segs, err := m.Segments(src)
+	segs, err := m.Segments(context.Background(), src)
 	if err != nil || len(segs) != 7 {
 		t.Fatalf("segments %v, %v", segs, err)
 	}
@@ -129,7 +130,7 @@ func TestBusy(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "ffmpeg")
 	os.WriteFile(bin, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755)
 	m := &Manager{FFmpeg: bin, Dir: filepath.Join(t.TempDir(), "hls"), Workers: 1,
-		Keyframes: func(string) ([]time.Duration, error) { return []time.Duration{0, sec(10)}, nil }}
+		Keyframes: func(context.Context, Source) ([]time.Duration, error) { return []time.Duration{0, sec(10)}, nil }}
 	a := Source{Key: "a", Path: "/m/a.mkv", Duration: sec(20), Audio: 1}
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()

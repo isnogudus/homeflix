@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"homeflix/internal/catalog"
+	"homeflix/internal/hls"
 	"homeflix/internal/library"
 	"homeflix/internal/metadata"
 	"homeflix/internal/store"
@@ -62,6 +63,7 @@ func TestAdminPages(t *testing.T) {
 				Report: library.Report{Libraries: []library.LibraryReport{{Name: "Filme", Movies: 1732, Added: 2}}, Took: 44 * time.Millisecond}}
 		}
 		s.Settings = []Setting{{Name: "listen on", Value: ":8096"}}
+		s.HLS = &hls.Manager{}
 	})
 	for path, want := range map[string]string{
 		"/admin/":         "v-test",
@@ -76,7 +78,8 @@ func TestAdminPages(t *testing.T) {
 		}
 	}
 	if rec := f.do(lan, "GET", "/admin/", nil, c); !strings.Contains(rec.Body.String(), "3 h 0 min") ||
-		!strings.Contains(rec.Body.String(), "TMDB ist aus") {
+		!strings.Contains(rec.Body.String(), "TMDB ist aus") ||
+		!strings.Contains(rec.Body.String(), "<dt>Keyframe-Index</dt><dd>0 / 0</dd>") {
 		t.Errorf("overview: %s", rec.Body.String())
 	}
 	rec := f.post("/admin/library/scan", c, nil)

@@ -26,7 +26,10 @@ var ErrBusy = errors.New("all remux workers are busy")
 // Source is one audio track of a file to remux.
 type Source struct {
 	Key      string // changes with the file's content, e.g. ID, size, mtime
+	FileID   string
 	Path     string
+	Size     int64
+	ModTime  time.Time
 	Duration time.Duration
 	Audio    int // stream index of the audio track
 }
@@ -61,8 +64,9 @@ type Manager struct {
 	Dir     string // working directory, emptied on Run
 	Workers int    // ffmpeg processes at most
 	Log     *slog.Logger
-	// Keyframes reads the keyframes of a file; keyframes.Read if nil.
-	Keyframes func(path string) ([]time.Duration, error)
+	// Keyframes returns the keyframes of a file, normally from the stored
+	// index; if nil, they are read from the container index of the file.
+	Keyframes func(ctx context.Context, src Source) ([]time.Duration, error)
 
 	mu       sync.Mutex
 	sessions map[string]*session
@@ -96,30 +100,30 @@ type run struct {
 	stopped atomic.Bool
 }
 
-func (m *Manager) keyframesOf(path string) ([]time.Duration, error) {
+func (m *Manager) keyframesOf(ctx context.Context, src Source) ([]time.Duration, error) {
 	if m.Keyframes != nil {
-		return m.Keyframes(path)
+		return m.Keyframes(ctx, src)
 	}
-	return keyframes.Read(path)
+	return keyframes.Read(src.Path)
 }
 
 // maxPlans bounds the cached segment plans.
 const maxPlans = 512
 
 // Segments plans the segments of a file, once per Source.Key.
-func (m *Manager) Segments(src Source) ([]Segment, error) {
-	p, err := m.planOf(src)
+func (m *Manager) Segments(ctx context.Context, src Source) ([]Segment, error) {
+	p, err := m.planOf(ctx, src)
 	return p.segments, err
 }
 
-func (m *Manager) planOf(src Source) (plan, error) {
+func (m *Manager) planOf(ctx context.Context, src Source) (plan, error) {
 	m.mu.Lock()
 	p, ok := m.plans[src.Key]
 	m.mu.Unlock()
 	if ok {
 		return p, nil
 	}
-	kf, err := m.keyframesOf(src.Path)
+	kf, err := m.keyframesOf(ctx, src)
 	if err != nil {
 		return plan{}, err
 	}
@@ -136,7 +140,7 @@ func (m *Manager) planOf(src Source) (plan, error) {
 // Segment returns the path of segment n of src once ffmpeg has made it,
 // starting or moving ffmpeg as needed.
 func (m *Manager) Segment(ctx context.Context, src Source, n int) (string, error) {
-	p, err := m.planOf(src)
+	p, err := m.planOf(ctx, src)
 	if err != nil {
 		return "", err
 	}

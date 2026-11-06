@@ -27,7 +27,13 @@ const (
 	idCueTime       = 0xB3
 	idCuePositions  = 0xB7
 	idCueTrack      = 0xF7
+	idCueCluster    = 0xF1
+	idCueRelative   = 0xF0
 	idCluster       = 0x1F43B675
+	idSimpleBlock   = 0xA3
+	idBlockGroup    = 0xA0
+	idBlock         = 0xA1
+	idRefBlock      = 0xFB
 )
 
 // unknownSize marks an element whose size is not written (live streams).
@@ -228,12 +234,14 @@ func matroska(r io.ReaderAt, size int64) ([]time.Duration, error) {
 	mem := reader{bytes.NewReader(raw), int64(len(raw))}
 	ce.data -= cues
 	var times []time.Duration
+	var blocks []cueBlock
 	err = mem.children(ce, func(p element) (bool, error) {
 		if p.id != idCuePoint {
 			return true, nil
 		}
 		var t uint64
 		forVideo := videoTrack == 0
+		block := cueBlock{cluster: -1}
 		err := mem.children(p, func(c element) (bool, error) {
 			switch c.id {
 			case idCueTime:
@@ -241,21 +249,126 @@ func matroska(r io.ReaderAt, size int64) ([]time.Duration, error) {
 				t = v
 				return true, err
 			case idCuePositions:
-				return true, mem.children(c, func(tp element) (bool, error) {
-					if tp.id == idCueTrack {
-						if n, err := mem.uint(tp); err == nil && n == videoTrack {
-							forVideo = true
-						}
+				var track uint64
+				cluster, relative := int64(-1), int64(-1)
+				err := mem.children(c, func(tp element) (bool, error) {
+					switch tp.id {
+					case idCueTrack:
+						track, _ = mem.uint(tp)
+					case idCueCluster:
+						v, err := mem.uint(tp)
+						cluster = int64(v)
+						return true, err
+					case idCueRelative:
+						v, err := mem.uint(tp)
+						relative = int64(v)
+						return true, err
 					}
 					return true, nil
 				})
+				if videoTrack == 0 || track == videoTrack {
+					forVideo = true
+					if cluster >= 0 && relative >= 0 {
+						block = cueBlock{cluster: seg.data + cluster, relative: relative}
+					}
+				}
+				return true, err
 			}
 			return true, nil
 		})
 		if forVideo {
 			times = append(times, time.Duration(t*scale))
+			blocks = append(blocks, block)
 		}
 		return true, err
 	})
-	return times, err
+	if err != nil {
+		return nil, err
+	}
+	if err := rd.checkBlocks(blocks, videoTrack); err != nil {
+		return nil, err
+	}
+	return times, nil
+}
+
+// cueBlock is where a cue point says its block is: the file offset of the
+// cluster, and the position of the block in the cluster's data.
+type cueBlock struct{ cluster, relative int64 }
+
+// cueSamples is how many cue points are checked against their blocks.
+const cueSamples = 12
+
+// checkBlocks reads the blocks of a few cue points spread over the file
+// and makes sure they are keyframes of the video track. Some muxers cue
+// every frame, and Cues of a damaged file point anywhere; neither can be
+// used to cut. Cue points without a relative position are not checked.
+func (rd reader) checkBlocks(blocks []cueBlock, videoTrack uint64) error {
+	for i := range cueSamples {
+		if len(blocks) == 0 {
+			break
+		}
+		b := blocks[i*(len(blocks)-1)/max(cueSamples-1, 1)]
+		if b.cluster < 0 {
+			continue
+		}
+		cl, err := rd.element(b.cluster)
+		if err != nil || cl.id != idCluster {
+			return fmt.Errorf("cue point at %d: no cluster there", b.cluster)
+		}
+		off := cl.data + b.relative
+		key, track, err := rd.block(off)
+		switch {
+		case err != nil:
+			return fmt.Errorf("cue point at %d: %w", off, err)
+		case videoTrack != 0 && track != videoTrack:
+			return fmt.Errorf("cue point at %d is a block of track %d, not of video track %d", off, track, videoTrack)
+		case !key:
+			return fmt.Errorf("cue point at %d is not a keyframe: the Cues list other frames too", off)
+		}
+	}
+	return nil
+}
+
+// block reads whether the SimpleBlock or BlockGroup at off is a keyframe,
+// and its track.
+func (rd reader) block(off int64) (key bool, track uint64, err error) {
+	e, err := rd.element(off)
+	if err != nil {
+		return false, 0, err
+	}
+	header := func(data int64) (uint64, byte, error) {
+		track, n, err := rd.vint(data, false)
+		if err != nil {
+			return 0, 0, err
+		}
+		flags, err := rd.bytes(data+int64(n)+2, 1) // after the 16-bit timecode
+		if err != nil {
+			return 0, 0, err
+		}
+		return track, flags[0], nil
+	}
+	switch e.id {
+	case idSimpleBlock:
+		track, flags, err := header(e.data)
+		return flags&0x80 != 0, track, err
+	case idBlockGroup:
+		// A Block in a group is a keyframe unless it references another.
+		key, found := true, false
+		err := rd.children(e, func(c element) (bool, error) {
+			switch c.id {
+			case idBlock:
+				found = true
+				track, _, err = header(c.data)
+				return true, err
+			case idRefBlock:
+				key = false
+			}
+			return true, nil
+		})
+		if err == nil && !found {
+			err = errors.New("block group without block")
+		}
+		return key, track, err
+	}
+	return false, 0, fmt.Errorf("element %#x where a block should be", e.id)
 }

@@ -110,7 +110,9 @@ Stills are made in the background after each scan and on first request.
 ```sh
 homeflix scan -config /usr/local/etc/homeflix.conf            # scan once
 homeflix scan -reprobe -config /usr/local/etc/homeflix.conf   # probe everything again
+homeflix scan -reindex -config /usr/local/etc/homeflix.conf   # find all keyframes again
 homeflix stats -config /usr/local/etc/homeflix.conf           # containers, codecs, HDR, failures
+homeflix keyframes /media/movies/Film.mkv                     # keyframes as the server finds them
 ```
 
 ## Metadata from TMDB
@@ -173,7 +175,13 @@ the audio tracks of a file. What browsers decode themselves (h264 with AAC
 or MP3 in MP4) plays as it is. Other h264 files, such as MKV with AC3,
 DTS or TrueHD, and other audio tracks, are remuxed on the fly: the video
 is copied, the audio converted to AAC, and the player gets HLS, cut at the
-keyframes read from the container index. ffmpeg runs only while someone
+keyframes of the file. They are found once per file, in the background
+after a scan or on first play, and kept in the database until the file
+changes: from the container index (Matroska Cues, the MP4 sync sample
+table) when it covers the file, else by reading all packets with ffprobe,
+one file at a time after the others are done, which takes seconds for small
+files and a few minutes for large ones; the admin overview shows how many
+files are done. ffmpeg runs only while someone
 watches, pauses when it is a minute ahead, and its segments in
 `transcode/` in the data directory are removed as the player moves on.
 Other video (VC-1, MPEG-2, MPEG-4 ASP, HEVC outside Safari) says what is

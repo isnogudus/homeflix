@@ -149,6 +149,9 @@ func (s *Server) adminOverview(w http.ResponseWriter, r *http.Request, sess *ses
 	}
 	if s.HLS != nil {
 		d["Remuxing"] = s.HLS.Sessions()
+		if kf, err := s.Store.KeyframeStats(ctx); err == nil {
+			d["Keyframes"] = kf
+		}
 	}
 	s.render(w, r, http.StatusOK, "admin", sess, d)
 }

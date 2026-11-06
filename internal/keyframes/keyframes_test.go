@@ -12,6 +12,8 @@ import (
 // The test files are 10 s of 25 fps h264 with B-frames and a keyframe every
 // 2 s, written by ffmpeg (Matroska, MP4 with the moov box first and last)
 // and by mkvmerge. ffprobe finds keyframes at 0, 2, 4, 6 and 8 s in each.
+// allcues.mkv is ffmpeg.mkv remuxed with mkvmerge --cues 0:all: its Cues
+// list every frame.
 func TestRead(t *testing.T) {
 	want := []time.Duration{0, 2 * time.Second, 4 * time.Second, 6 * time.Second, 8 * time.Second}
 	for _, name := range []string{"ffmpeg.mkv", "mkvmerge.mkv", "faststart.mp4", "moovlast.mp4"} {

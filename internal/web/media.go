@@ -88,7 +88,8 @@ func (s *Server) playable(p catalog.Part) (mode string, why playability) {
 // hlsSource describes the remux of one audio track of a part.
 func hlsSource(p catalog.Part, audio int) hls.Source {
 	return hls.Source{Key: fmt.Sprintf("%s-%d-%d", p.File.ID, p.File.Size, p.File.ModTime.UnixMilli()),
-		Path: p.File.Path, Duration: p.Info.Duration, Audio: audio}
+		FileID: p.File.ID, Path: p.File.Path, Size: p.File.Size, ModTime: p.File.ModTime,
+		Duration: p.Info.Duration, Audio: audio}
 }
 
 // hlsPart finds the part and audio track of an HLS request.
@@ -121,7 +122,7 @@ func (s *Server) hlsPlaylist(w http.ResponseWriter, r *http.Request, sess *sessi
 	if !ok {
 		return
 	}
-	segs, err := s.HLS.Segments(src)
+	segs, err := s.HLS.Segments(r.Context(), src)
 	if err != nil {
 		s.Log.Warn("no segment plan", "item", ref.Movie.Title, "err", err)
 		http.Error(w, "this file cannot be remuxed", http.StatusUnprocessableEntity)

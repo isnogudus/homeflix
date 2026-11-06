@@ -13,6 +13,7 @@ import (
 	"text/tabwriter"
 
 	"homeflix/internal/config"
+	"homeflix/internal/keyframes"
 	"homeflix/internal/library"
 	"homeflix/internal/probe"
 	"homeflix/internal/store"
@@ -30,11 +31,17 @@ func newScanner(cfg config.Config, db *store.Store, log *slog.Logger) *library.S
 	}
 }
 
+func newIndexer(cfg config.Config, db *store.Store, log *slog.Logger) *keyframes.Indexer {
+	return &keyframes.Indexer{Store: db, Workers: cfg.ProbeWorkers, Log: log,
+		Finder: keyframes.Finder{FFprobe: cfg.FFprobe, Scans: make(chan struct{}, 1)}}
+}
+
 func scanCommand(args []string, cio cliIO) error {
 	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
 	fs.SetOutput(cio.stderr)
 	configPath := fs.String("config", defaultConfigPath, "configuration file")
 	reprobe := fs.Bool("reprobe", false, "probe every file again, not only new and changed ones")
+	reindex := fs.Bool("reindex", false, "find the keyframes of every file again")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -56,10 +63,26 @@ func scanCommand(args []string, cio cliIO) error {
 			return err
 		}
 	}
+	if *reindex {
+		if err := db.ResetKeyframes(ctx); err != nil {
+			return err
+		}
+	}
 	rep, err := newScanner(cfg, db, log).Scan(ctx)
 	printReport(cio.stdout, rep)
 	if err != nil {
 		return err
+	}
+	ix := newIndexer(cfg, db, log)
+	ix.Shutdown = ctx
+	krep, err := ix.IndexAll(ctx)
+	fmt.Fprintf(cio.stdout, "keyframes: %d from the container index, %d with ffprobe, %d failed, took %s\n",
+		krep.Indexed, krep.Scanned, krep.Failed, krep.Took.Round(1e7))
+	if err != nil {
+		return err
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
 	}
 	if rep.Changed() {
 		return bumpCatalog(ctx, db)

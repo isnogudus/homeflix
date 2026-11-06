@@ -61,7 +61,7 @@ Commands:
   match     look up movies at TMDB, list and correct matches
   backup    write a consistent copy of the database
   stats     summarise containers and codecs of the libraries
-  keyframes list the video keyframes of files, read from their index
+  keyframes list the video keyframes of files
   user      manage users (add, passwd, admin, delete, list)
   version   print the version
 
@@ -166,7 +166,13 @@ func serve(args []string, stdout, stderr io.Writer) error {
 	}
 	imgs := &images.Service{FFmpeg: cfg.FFmpeg, Dir: filepath.Join(cfg.DataDir, "images"), Workers: cfg.ImageWorkers, Log: log}
 	subs := &subtitles.Service{FFmpeg: cfg.FFmpeg, Dir: filepath.Join(cfg.DataDir, "subtitles"), Log: log}
-	remux := &hls.Manager{FFmpeg: cfg.FFmpeg, Dir: filepath.Join(cfg.DataDir, "transcode"), Workers: cfg.TranscodeWorkers, Log: log}
+	kf := newIndexer(cfg, db, log)
+	kf.Shutdown = ctx
+	remux := &hls.Manager{FFmpeg: cfg.FFmpeg, Dir: filepath.Join(cfg.DataDir, "transcode"), Workers: cfg.TranscodeWorkers, Log: log,
+		Keyframes: func(ctx context.Context, src hls.Source) ([]time.Duration, error) {
+			return kf.Get(ctx, store.MediaFile{ID: src.FileID, Path: src.Path, Size: src.Size, ModTime: src.ModTime,
+				Duration: src.Duration})
+		}}
 
 	var background sync.WaitGroup
 	defer background.Wait()
@@ -204,6 +210,15 @@ func serve(args []string, stdout, stderr io.Writer) error {
 			if rep.Changed() {
 				reload()
 			}
+			// Keyframes of new files are found alongside the metadata;
+			// IndexAll returns at once while an earlier run goes on.
+			background.Add(1)
+			go func() {
+				defer background.Done()
+				if _, err := kf.IndexAll(ctx); err != nil && ctx.Err() == nil {
+					log.Error("find keyframes", "err", err)
+				}
+			}()
 			if meta != nil {
 				mrep, err := meta.Update(ctx)
 				switch {
