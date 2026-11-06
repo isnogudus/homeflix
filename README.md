@@ -193,7 +193,8 @@ The admin UI shows the state of the server and does what the `user` and
 - overview: library, metadata, requests to TMDB, last scan, and how
   homeflix sees your request (address, proxy);
 - users: create, set passwords, grant or remove administrator rights,
-  delete, and sign out single devices;
+  choose how far movies are converted for them, delete, and sign out
+  single devices;
 - library: start a scan, stream survey, probe failures;
 - metadata: movies without metadata, search TMDB and match by hand, or
   forget a match;
@@ -227,8 +228,17 @@ homeflix user add anna -admin -config /usr/local/etc/homeflix.conf
 homeflix user passwd anna       # also signs anna out on every device
 homeflix user list              # users with their signed-in devices
 homeflix user admin anna        # administrator rights; -remove takes them back
+homeflix user conversion anna audio   # none, audio or all
 homeflix user delete anna
 ```
+
+As in Jellyfin, an administrator decides per user how far the server may
+convert movies for them: `none` plays only files the player takes as they
+are, `audio` also lets the web client remux (video copied, audio
+converted), and `all`, the default, allows video transcoding as well, once
+homeflix has it. Jellyfin apps see the level in the user policy
+(`EnablePlaybackRemuxing`, `EnableAudioPlaybackTranscoding`,
+`EnableVideoPlaybackTranscoding`).
 
 `/Users/Public` always returns an empty list, so login screens ask for name
 and password instead of showing who has an account.

@@ -14,6 +14,7 @@ import (
 	"homeflix/internal/hls"
 	"homeflix/internal/media"
 	"homeflix/internal/playstate"
+	"homeflix/internal/store"
 	"homeflix/internal/subtitles"
 )
 
@@ -21,7 +22,7 @@ import (
 // why: a text key and the codec or container in the way.
 type playability struct {
 	OK     bool
-	Reason string // "needsRemux", "needsAudio", "needsVideo"
+	Reason string // "needsRemux", "needsAudio", "needsVideo", "conversionOff"
 	Detail string
 }
 
@@ -71,18 +72,28 @@ func remuxable(p catalog.Part) playability {
 	return playability{OK: true}
 }
 
-// playable says how a part plays in browsers: as it is, remuxed by the
-// server (hls), or not yet.
-func (s *Server) playable(p catalog.Part) (mode string, why playability) {
-	if d := directPlay(p); d.OK {
+// playable says how a part plays in browsers for a user: as it is,
+// remuxed by the server (hls), or not, because the server cannot convert it
+// yet or the user's account plays files only as they are.
+func (s *Server) playable(p catalog.Part, conv store.Conversion) (mode string, why playability) {
+	d := directPlay(p)
+	r := remuxable(p)
+	switch {
+	case d.OK:
 		return "direct", d
-	} else if r := remuxable(p); r.OK && s.HLS != nil {
-		return "hls", d
-	} else if !r.OK {
+	case !r.OK:
 		return "", r
-	} else {
+	case s.HLS == nil:
 		return "", d
+	case !conv.Remux():
+		return "", playability{Reason: "conversionOff", Detail: d.Detail}
 	}
+	return "hls", d
+}
+
+// remuxFor reports whether the server remuxes a part for a user.
+func (s *Server) remuxFor(p catalog.Part, conv store.Conversion) bool {
+	return s.HLS != nil && conv.Remux() && remuxable(p).OK
 }
 
 // hlsSource describes the remux of one audio track of a part.
@@ -93,9 +104,13 @@ func hlsSource(p catalog.Part, audio int) hls.Source {
 }
 
 // hlsPart finds the part and audio track of an HLS request.
-func (s *Server) hlsPart(w http.ResponseWriter, r *http.Request) (catalog.PartRef, hls.Source, bool) {
+func (s *Server) hlsPart(w http.ResponseWriter, r *http.Request, sess *session) (catalog.PartRef, hls.Source, bool) {
 	if s.Catalog == nil || s.HLS == nil {
 		http.NotFound(w, r)
+		return catalog.PartRef{}, hls.Source{}, false
+	}
+	if !sess.User.Conversion.Remux() {
+		http.Error(w, "this account plays movies only as they are", http.StatusForbidden)
 		return catalog.PartRef{}, hls.Source{}, false
 	}
 	ref, ok := s.Catalog.Snapshot().Part(r.PathValue("file"))
@@ -118,7 +133,7 @@ func hasAudio(info media.Info, index int) bool {
 
 // hlsPlaylist serves the playlist of a remuxed part.
 func (s *Server) hlsPlaylist(w http.ResponseWriter, r *http.Request, sess *session) {
-	ref, src, ok := s.hlsPart(w, r)
+	ref, src, ok := s.hlsPart(w, r, sess)
 	if !ok {
 		return
 	}
@@ -136,7 +151,7 @@ func (s *Server) hlsPlaylist(w http.ResponseWriter, r *http.Request, sess *sessi
 
 // hlsSegment serves a segment, waiting for ffmpeg to make it.
 func (s *Server) hlsSegment(w http.ResponseWriter, r *http.Request, sess *session) {
-	_, src, ok := s.hlsPart(w, r)
+	_, src, ok := s.hlsPart(w, r, sess)
 	if !ok {
 		return
 	}

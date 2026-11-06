@@ -276,5 +276,7 @@ exercises sessions, templates and the access rules on a small surface.
    remux) and *all* (also video transcoding, N5). The Jellyfin policy
    fields are reported from it (remuxing and audio for *audio*, all three
    for *all*), the web client offers only what the level allows, and the
-   HLS endpoints refuse the rest. Decided together with the remux offer to
-   Jellyfin clients and the stored keyframe index, after N4.
+   HLS endpoints refuse the rest. Decided after N4 and built that way:
+   the level is stored per user (default *all*, as Jellyfin), set in the
+   admin UI or with `homeflix user conversion`. The remux offer to
+   Jellyfin clients (`TranscodingUrl`) will follow the same level.

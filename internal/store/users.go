@@ -21,11 +21,39 @@ type User struct {
 	Name           string
 	PasswordHash   string
 	IsAdmin        bool
+	Conversion     Conversion
 	Configuration  string // JSON object as last sent by a client
 	CreatedAt      time.Time
 	LastLoginAt    time.Time // zero if never
 	LastActivityAt time.Time // zero if never
 }
+
+// Conversion says how far the server may convert movies for a user, as
+// Jellyfin's user policy does: not at all, so that only files the player
+// takes as they are play; the audio only, with the video copied into a new
+// container (remuxing); or also the video (transcoding).
+type Conversion string
+
+const (
+	ConversionNone  Conversion = "none"
+	ConversionAudio Conversion = "audio"
+	ConversionAll   Conversion = "all"
+)
+
+// Conversions lists the levels from the least to the most.
+var Conversions = []Conversion{ConversionNone, ConversionAudio, ConversionAll}
+
+// Valid reports whether c is one of the levels.
+func (c Conversion) Valid() bool {
+	return c == ConversionNone || c == ConversionAudio || c == ConversionAll
+}
+
+// Remux reports whether the server may copy the video into another
+// container and convert the audio.
+func (c Conversion) Remux() bool { return c == ConversionAudio || c == ConversionAll }
+
+// Transcode reports whether the server may also convert the video.
+func (c Conversion) Transcode() bool { return c == ConversionAll }
 
 // Token is an access token issued to one device of one user. The token
 // itself is never stored, only its hash.
@@ -60,12 +88,12 @@ func isUniqueViolation(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
 }
 
-const userColumns = "id, name, password_hash, is_admin, configuration, created_at, last_login_at, last_activity_at"
+const userColumns = "id, name, password_hash, is_admin, conversion, configuration, created_at, last_login_at, last_activity_at"
 
 func scanUser(row interface{ Scan(...any) error }) (User, error) {
 	var u User
 	var created, login, activity sql.NullInt64
-	err := row.Scan(&u.ID, &u.Name, &u.PasswordHash, &u.IsAdmin, &u.Configuration, &created, &login, &activity)
+	err := row.Scan(&u.ID, &u.Name, &u.PasswordHash, &u.IsAdmin, &u.Conversion, &u.Configuration, &created, &login, &activity)
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
@@ -156,6 +184,14 @@ func (s *Store) SetPassword(ctx context.Context, userID, passwordHash string) er
 // SetAdmin grants or removes administrator rights.
 func (s *Store) SetAdmin(ctx context.Context, userID string, admin bool) error {
 	return expectOne(s.db.ExecContext(ctx, "UPDATE users SET is_admin = ? WHERE id = ?", admin, userID))
+}
+
+// SetConversion sets how far the server may convert movies for the user.
+func (s *Store) SetConversion(ctx context.Context, userID string, c Conversion) error {
+	if !c.Valid() {
+		return fmt.Errorf("conversion %q: want none, audio or all", c)
+	}
+	return expectOne(s.db.ExecContext(ctx, "UPDATE users SET conversion = ? WHERE id = ?", string(c), userID))
 }
 
 // DeleteUser removes a user together with its tokens and preferences.

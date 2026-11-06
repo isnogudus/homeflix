@@ -139,6 +139,21 @@ func TestAdminFlagAndSessions(t *testing.T) {
 	if err := s.SetAdmin(ctx, "nobody", true); !errors.Is(err, ErrNotFound) {
 		t.Errorf("unknown user: %v", err)
 	}
+	if u.Conversion != ConversionAll {
+		t.Errorf("new user converts %q, want all", u.Conversion)
+	}
+	if err := s.SetConversion(ctx, u.ID, ConversionNone); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.UserByID(ctx, u.ID); got.Conversion != ConversionNone || got.Conversion.Remux() {
+		t.Errorf("conversion %q after setting none", got.Conversion)
+	}
+	if err := s.SetConversion(ctx, u.ID, "video"); err == nil {
+		t.Error("unknown conversion level accepted")
+	}
+	if err := s.SetConversion(ctx, "nobody", ConversionAudio); !errors.Is(err, ErrNotFound) {
+		t.Errorf("conversion of unknown user: %v", err)
+	}
 	now := time.Now().UTC()
 	for _, id := range []string{"s1", "s2"} {
 		if err := s.CreateToken(ctx, Token{Hash: "h" + id, SessionID: id, UserID: u.ID, DeviceID: "d" + id,

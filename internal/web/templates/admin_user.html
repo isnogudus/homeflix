@@ -56,6 +56,17 @@
 			{{if not $.Data.Self}}<button>{{t "save"}}</button>{{end}}
 		</form>
 	</section>
+	<section class="card">
+		<h2>{{t "conversion"}}</h2>
+		<form class="stack" method="post" action="/admin/users/{{.ID}}/conversion">
+			{{template "csrf" $}}
+			{{range $.Data.Conversions}}
+			<label class="check"><input type="radio" name="conversion" value="{{.Value}}"{{if .Checked}} checked{{end}}> {{t .Label}}</label>
+			{{end}}
+			<p class="note">{{t "conversionNote"}}</p>
+			<button>{{t "save"}}</button>
+		</form>
+	</section>
 	{{if not $.Data.Self}}
 	<section class="card">
 		<h2>{{t "deleteUser"}}</h2>

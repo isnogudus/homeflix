@@ -138,6 +138,19 @@ func TestAdminUsers(t *testing.T) {
 		t.Error("anna's session survived")
 	}
 
+	// Conversion levels.
+	if body := f.do(lan, "GET", "/admin/users/"+anna.ID, nil, c).Body.String(); !strings.Contains(body, `value="all" checked`) {
+		t.Errorf("conversion choice: %s", body)
+	}
+	if rec := f.post("/admin/users/"+anna.ID+"/conversion", c, url.Values{"conversion": {"none"}}); !strings.HasSuffix(rec.Header().Get("Location"), "ok=conversionChanged") ||
+		f.user("anna").Conversion != store.ConversionNone {
+		t.Errorf("conversion none: %v %q", rec.Header(), f.user("anna").Conversion)
+	}
+	if rec := f.post("/admin/users/"+anna.ID+"/conversion", c, url.Values{"conversion": {"video"}}); !strings.HasSuffix(rec.Header().Get("Location"), "err=conversionInvalid") ||
+		f.user("anna").Conversion != store.ConversionNone {
+		t.Errorf("invalid conversion: %v", rec.Header())
+	}
+
 	f.post("/admin/users/"+anna.ID+"/admin", c, url.Values{"admin": {"on"}})
 	if !f.user("anna").IsAdmin {
 		t.Error("admin right not granted")

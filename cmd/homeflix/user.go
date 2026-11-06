@@ -25,6 +25,9 @@ Subcommands:
   add <name>      create a user (-admin for an administrator)
   passwd <name>   set a new password; signs the user out everywhere
   admin <name>    make a user an administrator (-remove to take it back)
+  conversion <name> none|audio|all
+                  how far the server may convert movies for the user:
+                  not at all, the audio only (remux), or the video too
   delete <name>   delete a user with its sessions and preferences
   list            list users and their sessions
 
@@ -62,11 +65,14 @@ func userCommand(args []string, cio cliIO) error {
 		return err
 	}
 	wantNames := 1
-	if sub == "list" {
+	switch sub {
+	case "list":
 		wantNames = 0
+	case "conversion":
+		wantNames = 2
 	}
 	switch sub {
-	case "add", "passwd", "admin", "delete", "list":
+	case "add", "passwd", "admin", "conversion", "delete", "list":
 	default:
 		fmt.Fprint(cio.stderr, userUsage)
 		return fmt.Errorf("unknown user subcommand %q", sub)
@@ -140,6 +146,19 @@ func userCommand(args []string, cio cliIO) error {
 		} else {
 			fmt.Fprintf(cio.stdout, "%q is an administrator\n", u.Name)
 		}
+	case "conversion":
+		c := store.Conversion(names[1])
+		if !c.Valid() {
+			return fmt.Errorf("conversion %q: want none, audio or all", names[1])
+		}
+		u, err := db.UserByName(ctx, names[0])
+		if err != nil {
+			return fmt.Errorf("user %q: %w", names[0], err)
+		}
+		if err := db.SetConversion(ctx, u.ID, c); err != nil {
+			return err
+		}
+		fmt.Fprintf(cio.stdout, "%q: conversion %s\n", u.Name, c)
 	case "delete":
 		u, err := db.UserByName(ctx, names[0])
 		if err != nil {
@@ -185,15 +204,15 @@ func listUsers(ctx context.Context, db *store.Store, w io.Writer) error {
 		byUser[t.UserID] = append(byUser[t.UserID], t)
 	}
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tROLE\tLAST LOGIN\tSESSIONS")
+	fmt.Fprintln(tw, "NAME\tROLE\tCONVERSION\tLAST LOGIN\tSESSIONS")
 	for _, u := range users {
 		role := "user"
 		if u.IsAdmin {
 			role = "admin"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\n", u.Name, role, formatTime(u.LastLoginAt), len(byUser[u.ID]))
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\n", u.Name, role, u.Conversion, formatTime(u.LastLoginAt), len(byUser[u.ID]))
 		for _, t := range byUser[u.ID] {
-			fmt.Fprintf(tw, "  %s %s on %s\t\tlast seen %s\tfrom %s\n",
+			fmt.Fprintf(tw, "  %s %s on %s\t\t\tlast seen %s\tfrom %s\n",
 				t.Client, t.ClientVersion, t.DeviceName, formatTime(t.LastSeenAt), t.RemoteAddr)
 		}
 	}

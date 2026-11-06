@@ -307,3 +307,21 @@ func TestHomeScreenIsEmpty(t *testing.T) {
 		t.Errorf("system info: %v", info)
 	}
 }
+
+func TestPolicyConversion(t *testing.T) {
+	for _, tc := range []struct {
+		level                   store.Conversion
+		remux, audio, transcode bool
+	}{
+		{store.ConversionNone, false, false, false},
+		{store.ConversionAudio, true, true, false},
+		{store.ConversionAll, true, true, true},
+	} {
+		p := policyFor(store.User{Conversion: tc.level})
+		if p.EnablePlaybackRemuxing != tc.remux || p.EnableAudioPlaybackTranscoding != tc.audio ||
+			p.EnableVideoPlaybackTranscoding != tc.transcode {
+			t.Errorf("%s: remux %v, audio %v, video %v", tc.level, p.EnablePlaybackRemuxing,
+				p.EnableAudioPlaybackTranscoding, p.EnableVideoPlaybackTranscoding)
+		}
+	}
+}

@@ -43,6 +43,7 @@ func (s *Server) registerAdmin(mux *http.ServeMux) {
 	mux.HandleFunc("GET /admin/users/{id}", admin(s.adminUser))
 	mux.HandleFunc("POST /admin/users/{id}/password", admin(s.adminSetPassword))
 	mux.HandleFunc("POST /admin/users/{id}/admin", admin(s.adminSetAdmin))
+	mux.HandleFunc("POST /admin/users/{id}/conversion", admin(s.adminSetConversion))
 	mux.HandleFunc("POST /admin/users/{id}/delete", admin(s.adminDeleteUser))
 	mux.HandleFunc("POST /admin/users/{id}/sessions/{session}/end", admin(s.adminEndSession))
 	mux.HandleFunc("POST /admin/users/{id}/passkeys/{cred}/delete", admin(s.adminDeletePasskey))
@@ -261,6 +262,11 @@ func (s *Server) adminUser(w http.ResponseWriter, r *http.Request, sess *session
 	d["User"], d["Self"] = userRow{User: u, Devices: toks}, u.ID == sess.User.ID
 	d["Passkeys"] = keys
 	d["OwnSession"] = sess.Token.SessionID
+	var convs []conversionOption
+	for _, c := range store.Conversions {
+		convs = append(convs, conversionOption{Value: string(c), Label: conversionLabels[c], Checked: c == u.Conversion})
+	}
+	d["Conversions"] = convs
 	s.render(w, r, http.StatusOK, "admin_user", sess, d)
 }
 
@@ -309,6 +315,34 @@ func (s *Server) adminSetAdmin(w http.ResponseWriter, r *http.Request, sess *ses
 	}
 	s.Log.Info("admin rights changed", "user", u.Name, "admin", admin, "by", sess.User.Name)
 	back(w, r, "/admin/users/"+u.ID, "ok", "rightsChanged")
+}
+
+// conversionOption is one choice of a user's conversion level.
+type conversionOption struct {
+	Value, Label string
+	Checked      bool
+}
+
+var conversionLabels = map[store.Conversion]string{
+	store.ConversionNone: "conversionNone", store.ConversionAudio: "conversionAudio", store.ConversionAll: "conversionAll",
+}
+
+func (s *Server) adminSetConversion(w http.ResponseWriter, r *http.Request, sess *session) {
+	u, ok := s.targetUser(w, r)
+	if !ok {
+		return
+	}
+	c := store.Conversion(r.PostFormValue("conversion"))
+	if !c.Valid() {
+		back(w, r, "/admin/users/"+u.ID, "err", "conversionInvalid")
+		return
+	}
+	if err := s.Store.SetConversion(r.Context(), u.ID, c); err != nil {
+		s.fail(w, err)
+		return
+	}
+	s.Log.Info("conversion changed", "user", u.Name, "conversion", string(c), "by", sess.User.Name)
+	back(w, r, "/admin/users/"+u.ID, "ok", "conversionChanged")
 }
 
 func (s *Server) adminDeleteUser(w http.ResponseWriter, r *http.Request, sess *session) {

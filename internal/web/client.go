@@ -410,7 +410,7 @@ func (s *Server) movie(w http.ResponseWriter, r *http.Request, sess *session) {
 	if a := defaultAudio(info); a != nil {
 		d["PlaysAudio"] = a.DisplayTitle
 	}
-	mode, play := s.playable(version.Parts[0])
+	mode, play := s.playable(version.Parts[0], sess.User.Conversion)
 	d["Play"], d["Playable"], d["Remux"] = play, mode != "", mode == "hls"
 	ud := user[m.ID]
 	d["Played"], d["Favorite"] = ud.Played, ud.IsFavorite
@@ -600,7 +600,7 @@ func (s *Server) play(w http.ResponseWriter, r *http.Request, sess *session) {
 	}
 	d := s.clientData(r, sess, "")
 	d["Name"], d["Back"] = m.Name(), "/web/movies/"+m.ID
-	if mode, why := s.playable(version.Parts[0]); mode == "" {
+	if mode, why := s.playable(version.Parts[0], sess.User.Conversion); mode == "" {
 		d["Play"] = why
 		s.render(w, r, http.StatusOK, "play", sess, d)
 		return
@@ -615,7 +615,7 @@ func (s *Server) play(w http.ResponseWriter, r *http.Request, sess *session) {
 		if directPlay(p).OK {
 			pp.Direct = "/web/stream/" + p.File.ID
 		}
-		if s.HLS != nil && remuxable(p).OK {
+		if s.remuxFor(p, sess.User.Conversion) {
 			pp.HLS = "/web/hls/" + p.File.ID + "/"
 		}
 		defAudio := p.Info.DefaultAudioIndex()

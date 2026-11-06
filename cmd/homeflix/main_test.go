@@ -89,8 +89,18 @@ func TestUserCommands(t *testing.T) {
 	if _, err := user("", "admin", "nobody"); err == nil {
 		t.Error("admin of an unknown user: want error")
 	}
+	if out, err := user("", "conversion", "bert", "audio"); err != nil || !strings.Contains(out, `"bert": conversion audio`) {
+		t.Errorf("conversion: %q, %v", out, err)
+	}
+	if _, err := user("", "conversion", "bert", "video"); err == nil {
+		t.Error("unknown conversion level: want error")
+	}
+	if _, err := user("", "conversion", "bert"); err == nil {
+		t.Error("conversion without level: want error")
+	}
 	out, err := user("", "list")
-	if err != nil || !strings.Contains(out, "anna") || !strings.Contains(out, "admin") || !strings.Contains(out, "bert") {
+	if err != nil || !strings.Contains(out, "anna") || !strings.Contains(out, "admin") || !strings.Contains(out, "bert") ||
+		!strings.Contains(out, "audio") {
 		t.Errorf("list: %q, %v", out, err)
 	}
 	if _, err := user("", "delete", "bert"); err != nil {

@@ -305,4 +305,36 @@ func TestRemuxPlayback(t *testing.T) {
 	if rec := f.do(lan, "GET", "/web/hls/f9/1/index.m3u8", nil, nil); rec.Code != http.StatusFound {
 		t.Errorf("playlist without session: %d", rec.Code)
 	}
+
+	// An account without conversion gets the original files only.
+	if err := f.db.SetConversion(context.Background(), f.user("anna").ID, store.ConversionNone); err != nil {
+		t.Fatal(err)
+	}
+	rec = f.do(lan, "GET", "/web/movies/"+remuxID, nil, c)
+	if strings.Contains(rec.Body.String(), "/web/play/"+remuxID) || !strings.Contains(rec.Body.String(), "nur so, wie sie sind") {
+		t.Errorf("details without conversion: %s", rec.Body.String())
+	}
+	if rec := f.do(lan, "GET", "/web/play/"+remuxID, nil, c); strings.Contains(rec.Body.String(), "/web/hls/") {
+		t.Errorf("player without conversion: %s", rec.Body.String())
+	}
+	for _, path := range []string{"/web/hls/f9/1/index.m3u8", "/web/hls/f9/1/0.ts"} {
+		if rec := f.do(lan, "GET", path, nil, c); rec.Code != http.StatusForbidden {
+			t.Errorf("%s without conversion: %d", path, rec.Code)
+		}
+	}
+}
+
+// A movie that plays as it is keeps its direct play without conversion,
+// but no remux of its other audio tracks.
+func TestDirectPlayWithoutConversion(t *testing.T) {
+	f, c, _ := clientFixture(t)
+	f.server.HLS = &hls.Manager{FFmpeg: "/nonexistent/ffmpeg", Dir: t.TempDir(), Workers: 1}
+	if err := f.db.SetConversion(context.Background(), f.user("anna").ID, store.ConversionNone); err != nil {
+		t.Fatal(err)
+	}
+	cfg := playerConfig(t, f.do(lan, "GET", "/web/play/"+slaveID, nil, c).Body.String())
+	part := cfg["parts"].([]any)[0].(map[string]any)
+	if part["direct"] != "/web/stream/f1" || part["hls"] != "" {
+		t.Errorf("part without conversion: %v", part)
+	}
 }

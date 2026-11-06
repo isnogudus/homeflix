@@ -24,8 +24,8 @@ type UserDto struct {
 }
 
 // UserPolicy lists what a user may do. homeflix has no per-user
-// restrictions beyond the administrator flag; features the server does not
-// offer are reported as disabled.
+// restrictions beyond the administrator flag and the conversion level;
+// features the server does not offer are reported as disabled.
 type UserPolicy struct {
 	IsAdministrator                  bool     `json:"IsAdministrator"`
 	IsHidden                         bool     `json:"IsHidden"`
@@ -73,14 +73,20 @@ type UserPolicy struct {
 
 func policyFor(u store.User) UserPolicy {
 	return UserPolicy{
-		IsAdministrator:                  u.IsAdmin,
-		BlockedTags:                      []string{},
-		AllowedTags:                      []string{},
-		EnableUserPreferenceAccess:       true,
-		AccessSchedules:                  []any{},
-		BlockUnratedItems:                []string{},
-		EnableRemoteAccess:               true,
-		EnableMediaPlayback:              true,
+		IsAdministrator:            u.IsAdmin,
+		BlockedTags:                []string{},
+		AllowedTags:                []string{},
+		EnableUserPreferenceAccess: true,
+		AccessSchedules:            []any{},
+		BlockUnratedItems:          []string{},
+		EnableRemoteAccess:         true,
+		EnableMediaPlayback:        true,
+		// As in Jellyfin: remuxing is changing the container, and with
+		// video copied the audio may be converted; video transcoding is
+		// the level above.
+		EnablePlaybackRemuxing:           u.Conversion.Remux(),
+		EnableAudioPlaybackTranscoding:   u.Conversion.Remux(),
+		EnableVideoPlaybackTranscoding:   u.Conversion.Transcode(),
 		EnableContentDeletionFromFolders: []string{},
 		EnableContentDownloading:         true,
 		EnabledDevices:                   []string{},
