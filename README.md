@@ -184,8 +184,21 @@ files and a few minutes for large ones; the admin overview shows how many
 files are done. ffmpeg runs only while someone
 watches, pauses when it is a minute ahead, and its segments in
 `transcode/` in the data directory are removed as the player moves on.
-Other video (VC-1, MPEG-2, MPEG-4 ASP, HEVC outside Safari) says what is
-missing until the server transcodes it.
+Other video (VC-1, MPEG-2, MPEG-4 ASP, HEVC) is transcoded to h264 with
+libx264: scaled down to fit 1080p, deinterlaced if needed, and HDR (HDR10,
+HLG, Dolby Vision with an HDR10 base layer) mapped to SDR by ffmpeg's
+scaler, which needs ffmpeg 8 or later. Text subtitles are tracks of the
+player; image subtitles (PGS, DVD) cannot be shown by browsers, so the
+player offers them burnt into a transcode, which then also applies to
+files that would otherwise play as they are. Where the video is
+transcoded anyway, the image subtitle marked as default (often the forced
+one for foreign-language scenes) is burnt in unless the viewer turns it
+off. A transcode of 4K HDR takes most of a 6-core processor; `video
+workers` in the configuration limits how many run at once. A player that
+switches audio or subtitles ends its previous conversion at once, one
+that has asked for nothing for 30 seconds gives its ffmpeg up to a new
+player, and when none is free the player says the server is busy and
+tries again.
 
 The admin UI shows the state of the server and does what the `user` and
 `match` commands do:
@@ -236,8 +249,8 @@ homeflix user delete anna
 As in Jellyfin, an administrator decides per user how far the server may
 convert movies for them: `none` plays only files the player takes as they
 are, `audio` also lets the web client remux (video copied, audio
-converted), and `all`, the default, allows video transcoding as well, once
-homeflix has it. Jellyfin apps see the level in the user policy
+converted), and `all`, the default, allows video transcoding and burnt-in
+image subtitles as well. Jellyfin apps see the level in the user policy
 (`EnablePlaybackRemuxing`, `EnableAudioPlaybackTranscoding`,
 `EnableVideoPlaybackTranscoding`).
 

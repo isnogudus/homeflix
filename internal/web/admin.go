@@ -150,7 +150,8 @@ func (s *Server) adminOverview(w http.ResponseWriter, r *http.Request, sess *ses
 		d["Scan"] = s.ScanStatus()
 	}
 	if s.HLS != nil {
-		d["Remuxing"] = s.HLS.Sessions()
+		all, video := s.HLS.Sessions()
+		d["Remuxing"], d["Transcoding"] = all, video
 		if kf, err := s.Store.KeyframeStats(ctx); err == nil {
 			d["Keyframes"] = kf
 		}

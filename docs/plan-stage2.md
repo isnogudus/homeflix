@@ -79,6 +79,12 @@ Text subtitles are extracted as WebVTT already (stage 1, M6).
 - The jail has 12 cores and no usable hardware encoder. Software h264
   encoding (libx264) of 1080p in real time takes a few cores per stream;
   the real number is measured in N5 and bounded by `transcode workers`.
+  Measured in N5 (Ryzen 5 8500G, libx264 `veryfast`, CRF 21, 60 s
+  samples): VC-1 1080p at 5.6 times real time on about 5.5 cores, DVD
+  MPEG-2 with deinterlacing and burnt-in subtitles at 36 times, HEVC 4K
+  HDR10 scaled to 1080p and mapped to SDR at 2.25 times on about 11 cores,
+  bound by decoding the 4K source. Two HDR transcodes at once just keep up,
+  so `video workers` defaults to 2.
 
 ### 2.4 Passkeys
 
@@ -177,6 +183,14 @@ streams.
 3. **Transcode to HLS:** h264 with libx264 at fixed segment lengths, scaled
    if needed; HDR to SDR tone mapping (`zscale`/`tonemap` if the FreeBSD
    ffmpeg has them, checked in N5); image subtitles burnt in when chosen.
+   Checked in N5: the FreeBSD package is built without zimg and
+   libplacebo, but the scaler of ffmpeg 8 and later maps HDR to SDR itself
+   (`scale=out_transfer=bt709:…:intent=perceptual`), which looks right on
+   HDR10 and on the ten Dolby Vision files, all profile 7 with an HDR10
+   base layer. The picture is scaled to 1080p first, which makes the
+   mapping four times cheaper. Interlaced sources go through `bwdif`.
+   HEVC is transcoded in Safari too; copying it for Safari would need
+   fragmented MP4 segments and is left for later.
 
 Sessions end when no segment is requested for a minute; their files in
 `data/transcode` are removed. At most `transcode workers` ffmpeg processes

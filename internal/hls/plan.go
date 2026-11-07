@@ -1,7 +1,9 @@
-// Package hls remuxes files for browsers: the video is copied, the chosen
-// audio track is converted to AAC, and the result is served as HLS in
-// MPEG-TS segments. Copied video can only be cut at keyframes, so the
-// segments are planned from the keyframes of the file; ffmpeg makes them on
+// Package hls converts files for browsers and serves them as HLS in MPEG-TS
+// segments: the chosen audio track becomes AAC, and the video is either
+// copied (remux) or transcoded to h264, with HDR mapped to SDR and an
+// image subtitle burnt in if asked. Copied video can only be cut at
+// keyframes, so its segments are planned from the keyframes of the file;
+// transcoded video is cut at fixed times. ffmpeg makes the segments on
 // demand, from where the player asks, and restarts when it jumps.
 package hls
 

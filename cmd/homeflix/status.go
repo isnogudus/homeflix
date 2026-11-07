@@ -96,6 +96,7 @@ func settingsOf(cfg config.Config, configPath string) []web.Setting {
 		{Name: "probe workers", Value: fmt.Sprint(cfg.ProbeWorkers)},
 		{Name: "image workers", Value: fmt.Sprint(cfg.ImageWorkers)},
 		{Name: "transcode workers", Value: fmt.Sprint(cfg.TranscodeWorkers)},
+		{Name: "video workers", Value: fmt.Sprint(cfg.VideoWorkers)},
 		{Name: "scan interval", Value: interval(cfg.ScanInterval)},
 		{Name: "sort articles", Value: strings.Join(cfg.SortArticles, ", ")},
 	}

@@ -39,8 +39,10 @@ type Config struct {
 	ProbeWorkers int
 	ImageWorkers int
 	// TranscodeWorkers is the number of ffmpeg processes that remux or
-	// transcode for players at once.
+	// transcode for players at once; VideoWorkers is how many of them may
+	// transcode video, which takes far more processor time.
 	TranscodeWorkers int
+	VideoWorkers     int
 	// ScanInterval is the time between automatic library scans; 0 turns
 	// them off. A scan also runs at startup.
 	ScanInterval time.Duration
@@ -116,6 +118,7 @@ func Default() Config {
 		ProbeWorkers:     4,
 		ImageWorkers:     2,
 		TranscodeWorkers: 4,
+		VideoWorkers:     2,
 		ScanInterval:     6 * time.Hour,
 		SortArticles:     []string{"the", "a", "an"},
 		DisplayLanguage:  "en",
@@ -140,7 +143,7 @@ func DefaultAdminFrom() []netip.Prefix {
 var keywords = []string{
 	"admin", "articles", "data", "directory", "discovery", "ffmpeg", "ffprobe", "file", "from", "image",
 	"interval", "language", "level", "library", "listen", "log", "name", "no", "on", "origin", "passkeys", "path",
-	"port", "probe", "proxy", "quickconnect", "refresh", "scan", "server", "sort", "tmdb", "token", "transcode", "trusted", "workers",
+	"port", "probe", "proxy", "quickconnect", "refresh", "scan", "server", "sort", "tmdb", "token", "transcode", "trusted", "video", "workers",
 }
 
 // Load reads the configuration file at path; "-" reads standard input. On
@@ -346,6 +349,8 @@ func (p *parser) statement() bool {
 		return p.once("image workers", t.Pos) && p.number(&p.cfg.ImageWorkers, 1, 16)
 	case p.Accept("transcode", "workers"):
 		return p.once("transcode workers", t.Pos) && p.number(&p.cfg.TranscodeWorkers, 1, 32)
+	case p.Accept("video", "workers"):
+		return p.once("video workers", t.Pos) && p.number(&p.cfg.VideoWorkers, 1, 16)
 	case p.Accept("scan", "interval"):
 		if !p.once("scan interval", t.Pos) {
 			return false

@@ -24,6 +24,7 @@
 #probe workers 4		# ffprobe processes while scanning
 #image workers 2		# ffmpeg processes making artwork
 #transcode workers 4		# ffmpeg processes converting for players
+#video workers 2		# of them, transcoding video
 
 #scan interval 6h		# or: no scan interval
 #sort articles { the a an }	# or: no sort articles

@@ -324,6 +324,91 @@ func TestRemuxPlayback(t *testing.T) {
 	}
 }
 
+// HEVC in HDR plays transcoded: scaled to 1080p, mapped to SDR, and with
+// an image subtitle burnt in when the player asks.
+func TestTranscodePlayback(t *testing.T) {
+	f, c, _ := clientFixture(t)
+	dir := t.TempDir()
+	// A stand-in for ffmpeg that notes its arguments and fails.
+	args := filepath.Join(dir, "args")
+	bin := filepath.Join(dir, "ffmpeg")
+	os.WriteFile(bin, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > "+args+"\nexit 1\n"), 0o755)
+	f.server.HLS = &hls.Manager{FFmpeg: bin, Dir: filepath.Join(dir, "hls"), Workers: 2, VideoWorkers: 1}
+
+	rec := f.do(lan, "GET", "/web/movies/"+arrivalID, nil, c)
+	if !strings.Contains(rec.Body.String(), "/web/play/"+arrivalID) || !strings.Contains(rec.Body.String(), "rechnet Bild und Ton") {
+		t.Errorf("details: %s", rec.Body.String())
+	}
+	cfg := playerConfig(t, f.do(lan, "GET", "/web/play/"+arrivalID, nil, c).Body.String())
+	part := cfg["parts"].([]any)[0].(map[string]any)
+	burn, _ := part["burn"].([]any)
+	if part["direct"] != "" || part["hls"] != "/web/hls/f2/" || part["video"] != true || len(burn) != 6 ||
+		burn[0].(map[string]any)["index"] != 3.0 || burn[0].(map[string]any)["default"] != true || cfg["burnLabel"] != "eingebrannt" {
+		t.Errorf("part: %v", part)
+	}
+	rec = f.do(lan, "GET", "/web/hls/f2/1t/index.m3u8", nil, c)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "#EXTINF:6.000000,\n0.ts\n") ||
+		!strings.Contains(rec.Body.String(), "#EXTINF:2.000000,\n1165.ts\n#EXT-X-ENDLIST") {
+		t.Errorf("playlist: %d %q", rec.Code, rec.Body.String())
+	}
+	for path, want := range map[string]int{
+		"/web/hls/f2/1/index.m3u8":   http.StatusNotFound, // HEVC cannot be copied
+		"/web/hls/f2/2t4/index.m3u8": http.StatusOK,       // other audio, subtitle burnt in
+		"/web/hls/f2/1t2/index.m3u8": http.StatusNotFound, // an audio track is no subtitle
+		"/web/hls/f2/1t9/index.m3u8": http.StatusNotFound,
+		"/web/hls/f2/01t/index.m3u8": http.StatusNotFound,
+		"/web/hls/f2/1tt/index.m3u8": http.StatusNotFound,
+	} {
+		if rec := f.do(lan, "GET", path, nil, c); rec.Code != want {
+			t.Errorf("%s: %d, want %d", path, rec.Code, want)
+		}
+	}
+	if rec := f.do(lan, "GET", "/web/hls/f2/1t3/0.ts", nil, c); rec.Code != http.StatusInternalServerError {
+		t.Errorf("segment with a failing ffmpeg: %d", rec.Code)
+	}
+	got, _ := os.ReadFile(args)
+	for _, want := range []string{"scale=1920:1080,scale=out_transfer=bt709", "[0:3]scale=1920:1080[sub]", "libx264", "0:1\n"} {
+		if !strings.Contains(string(got), want) {
+			t.Errorf("ffmpeg arguments lack %q:\n%s", want, got)
+		}
+	}
+
+	// Remux only: the movie does not play, and transcodes are refused.
+	if err := f.db.SetConversion(context.Background(), f.user("anna").ID, store.ConversionAudio); err != nil {
+		t.Fatal(err)
+	}
+	rec = f.do(lan, "GET", "/web/movies/"+arrivalID, nil, c)
+	if strings.Contains(rec.Body.String(), "/web/play/"+arrivalID) || !strings.Contains(rec.Body.String(), "nicht umgerechnet") {
+		t.Errorf("details without transcoding: %s", rec.Body.String())
+	}
+	if rec := f.do(lan, "GET", "/web/hls/f2/1t/index.m3u8", nil, c); rec.Code != http.StatusForbidden {
+		t.Errorf("transcode without the right: %d", rec.Code)
+	}
+	// Files that play otherwise offer no subtitles to burn in.
+	cfg = playerConfig(t, f.do(lan, "GET", "/web/play/"+slaveID, nil, c).Body.String())
+	if part := cfg["parts"].([]any)[0].(map[string]any); part["burn"] != nil || part["video"] != false {
+		t.Errorf("remux-only part: %v", part)
+	}
+}
+
+func TestParseVariant(t *testing.T) {
+	for in, want := range map[string][4]int{ // audio, transcode, sub, ok
+		"1": {1, 0, -1, 1}, "12t": {12, 1, -1, 1}, "2t5": {2, 1, 5, 1},
+		"": {0, 0, 0, 0}, "t": {0, 0, 0, 0}, "1x": {0, 0, 0, 0}, "-1": {0, 0, 0, 0}, "1t+5": {0, 0, 0, 0},
+	} {
+		a, tr, sub, ok := parseVariant(in)
+		b := func(v bool) int {
+			if v {
+				return 1
+			}
+			return 0
+		}
+		if got := [4]int{a, b(tr), sub, b(ok)}; ok != (want[3] == 1) || ok && got != want {
+			t.Errorf("parseVariant(%q) = %v, want %v", in, got, want)
+		}
+	}
+}
+
 // A movie that plays as it is keeps its direct play without conversion,
 // but no remux of its other audio tracks.
 func TestDirectPlayWithoutConversion(t *testing.T) {

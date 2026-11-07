@@ -9,6 +9,7 @@
 		<video controls playsinline preload="metadata"{{with .Data.Poster}} poster="{{.}}"{{end}}></video>
 		<div class="playerbar">
 			<label id="audiochoice" hidden>{{t "audio"}} <select></select></label>
+			<label id="subchoice" hidden>{{t "subtitles"}} <select></select></label>
 			<span class="note" id="partinfo" hidden></span>
 		</div>
 		<p class="flash err" id="playerror" hidden>{{t "playError"}}</p>

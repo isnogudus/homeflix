@@ -168,7 +168,8 @@ func serve(args []string, stdout, stderr io.Writer) error {
 	subs := &subtitles.Service{FFmpeg: cfg.FFmpeg, Dir: filepath.Join(cfg.DataDir, "subtitles"), Log: log}
 	kf := newIndexer(cfg, db, log)
 	kf.Shutdown = ctx
-	remux := &hls.Manager{FFmpeg: cfg.FFmpeg, Dir: filepath.Join(cfg.DataDir, "transcode"), Workers: cfg.TranscodeWorkers, Log: log,
+	remux := &hls.Manager{FFmpeg: cfg.FFmpeg, Dir: filepath.Join(cfg.DataDir, "transcode"), Workers: cfg.TranscodeWorkers,
+		VideoWorkers: cfg.VideoWorkers, Log: log,
 		Keyframes: func(ctx context.Context, src hls.Source) ([]time.Duration, error) {
 			return kf.Get(ctx, store.MediaFile{ID: src.FileID, Path: src.Path, Size: src.Size, ModTime: src.ModTime,
 				Duration: src.Duration})

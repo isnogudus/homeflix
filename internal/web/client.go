@@ -34,8 +34,8 @@ func (s *Server) registerClient(mux *http.ServeMux) {
 	mux.HandleFunc("GET /web/download/{file}", s.signedIn(s.download))
 	mux.HandleFunc("GET /web/subtitles/{file}/{index}", s.signedIn(s.subtitleTrack))
 	mux.HandleFunc("POST /web/progress", s.signedIn(s.progress))
-	mux.HandleFunc("GET /web/hls/{file}/{audio}/index.m3u8", s.signedIn(s.hlsPlaylist))
-	mux.HandleFunc("GET /web/hls/{file}/{audio}/{segment}", s.signedIn(s.hlsSegment))
+	mux.HandleFunc("GET /web/hls/{file}/{variant}/index.m3u8", s.signedIn(s.hlsPlaylist))
+	mux.HandleFunc("GET /web/hls/{file}/{variant}/{segment}", s.signedIn(s.hlsSegment))
 	mux.HandleFunc("GET /web/account", s.signedIn(s.account))
 	mux.HandleFunc("POST /web/account/password", s.signedIn(s.changeOwnPassword))
 	mux.HandleFunc("POST /web/account/sessions/{session}/end", s.signedIn(s.endOwnSession))
@@ -427,7 +427,7 @@ func (s *Server) movie(w http.ResponseWriter, r *http.Request, sess *session) {
 		d["Downloads"] = dl
 	}
 	mode, play := s.playable(version.Parts[0], sess.User.Conversion)
-	d["Play"], d["Playable"], d["Remux"] = play, mode != "", mode == "hls"
+	d["Play"], d["Playable"], d["Remux"], d["Transcode"] = play, mode != "", mode == "hls", mode == "transcode"
 	ud := user[m.ID]
 	d["Played"], d["Favorite"] = ud.Played, ud.IsFavorite
 	if mode != "" {
@@ -582,10 +582,12 @@ type playerPart struct {
 	Item     string        `json:"item"`   // the ID play state is kept under
 	Source   string        `json:"source"` // the version
 	Direct   string        `json:"direct"` // the file itself, "" if browsers cannot play it
-	HLS      string        `json:"hls"`    // remux playlists below it: <hls><audio>/index.m3u8; "" if none
+	HLS      string        `json:"hls"`    // playlists below it: <hls><variant>/index.m3u8; "" if none
+	Video    bool          `json:"video"`  // HLS must transcode the video
 	Duration float64       `json:"duration"`
 	Audio    []playerAudio `json:"audio"`
 	Tracks   []playerTrack `json:"tracks"`
+	Burn     []playerAudio `json:"burn"` // image subtitles the server can burn in; the default one is when the video is transcoded anyway
 }
 
 // playerAudio is an audio track the player offers.
@@ -631,7 +633,9 @@ func (s *Server) play(w http.ResponseWriter, r *http.Request, sess *session) {
 		if directPlay(p).OK {
 			pp.Direct = "/web/stream/" + p.File.ID
 		}
-		if s.remuxFor(p, sess.User.Conversion) {
+		remux, transcode := s.hlsFor(sess.User.Conversion)
+		pp.Video = !remuxable(p).OK
+		if remux && (transcode || !pp.Video) {
 			pp.HLS = "/web/hls/" + p.File.ID + "/"
 		}
 		defAudio := p.Info.DefaultAudioIndex()
@@ -642,9 +646,13 @@ func (s *Server) play(w http.ResponseWriter, r *http.Request, sess *session) {
 		}
 		defSub := p.Info.DefaultSubtitleIndex()
 		for _, st := range p.Info.Streams {
-			if st.Type == "Subtitle" && st.IsTextSubtitleStream {
+			switch {
+			case st.Type != "Subtitle":
+			case st.IsTextSubtitleStream:
 				pp.Tracks = append(pp.Tracks, playerTrack{Label: st.DisplayTitle, Lang: st.Language,
 					Src: "/web/subtitles/" + p.File.ID + "/" + strconv.Itoa(st.Index), Default: st.Index == defSub})
+			case pp.HLS != "" && transcode:
+				pp.Burn = append(pp.Burn, playerAudio{Index: st.Index, Label: st.DisplayTitle, Default: st.Index == defSub})
 			}
 		}
 		parts = append(parts, pp)
@@ -653,7 +661,8 @@ func (s *Server) play(w http.ResponseWriter, r *http.Request, sess *session) {
 	part = min(max(part, 0), len(parts)-1)
 	start, _ := strconv.Atoi(r.URL.Query().Get("t"))
 	config, err := json.Marshal(map[string]any{"parts": parts, "part": part, "start": max(start, 0), "csrf": sess.CSRF(),
-		"back": "/web/movies/" + m.ID, "partLabel": s.text("part"), "busy": s.text("remuxBusy")})
+		"back": "/web/movies/" + m.ID, "partLabel": s.text("part"), "busy": s.text("remuxBusy"),
+		"noSubtitles": s.text("noSubtitles"), "burnLabel": s.text("burnIn")})
 	if err != nil {
 		s.fail(w, err)
 		return

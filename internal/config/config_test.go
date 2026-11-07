@@ -53,6 +53,7 @@ ffmpeg "/usr/local/bin/ffmpeg"
 probe workers 8
 image workers 3
 transcode workers 2
+video workers 1
 scan interval 1h30m
 sort articles { The, der die das }
 trusted proxy { 192.168.1.2, 127.0.0.1 }
@@ -82,6 +83,7 @@ library Doku { path ${movies}_doku }
 		ProbeWorkers:     8,
 		ImageWorkers:     3,
 		TranscodeWorkers: 2,
+		VideoWorkers:     1,
 		ScanInterval:     90 * time.Minute,
 		SortArticles:     []string{"the", "der", "die", "das"},
 		DisplayLanguage:  "de",

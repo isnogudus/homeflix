@@ -21,9 +21,10 @@ import (
 )
 
 // ErrBusy is returned when all ffmpeg workers are taken.
-var ErrBusy = errors.New("all remux workers are busy")
+var ErrBusy = errors.New("all conversion workers are busy")
 
-// Source is one audio track of a file to remux.
+// Source is one audio track of a file to convert, with its video copied
+// or transcoded.
 type Source struct {
 	Key      string // changes with the file's content, e.g. ID, size, mtime
 	FileID   string
@@ -31,10 +32,28 @@ type Source struct {
 	Size     int64
 	ModTime  time.Time
 	Duration time.Duration
-	Audio    int // stream index of the audio track
+	Audio    int    // stream index of the audio track
+	Video    *Video // how the video is transcoded; nil copies it
+	// Owner is the player asking, such as a web session. A player plays
+	// one thing at a time, so its new session ends its others; players
+	// do not share sessions.
+	Owner string
 }
 
-func (s Source) session() string { return s.Key + "-a" + strconv.Itoa(s.Audio) }
+func (s Source) session() string {
+	k := s.Key + "-a" + strconv.Itoa(s.Audio) + s.Video.key()
+	if s.Owner != "" {
+		k += "-o" + s.Owner
+	}
+	return k
+}
+
+func (s Source) verb() string {
+	if s.Video != nil {
+		return "transcode"
+	}
+	return "remux"
+}
 
 // Tuning of the sessions.
 const (
@@ -47,10 +66,17 @@ const (
 	// A player that asks for a segment this far beyond what is made gets a
 	// new ffmpeg run starting there instead of waiting. Players ask for a
 	// few segments ahead after a seek; remuxing makes them in a second or
-	// two, so waiting is better than starting over.
-	restartGap = 8
+	// two, so waiting is better than starting over. Transcoding is slower,
+	// so it starts over sooner.
+	restartGap          = 8
+	restartGapTranscode = 3
 	// Sessions without requests for this long end.
 	idleTimeout = 2 * time.Minute
+	// When all workers are taken, the ffmpeg of a session without requests
+	// for this long gives way to a new one: its player is paused or gone,
+	// or it switched to another variant. Its segments stay; it gets a
+	// worker again when it asks.
+	yieldAfter = 30 * time.Second
 	// How long a request waits for its segment.
 	segmentWait = 45 * time.Second
 	// The fixed timestamp offset of the output: keeps decode times positive
@@ -58,12 +84,13 @@ const (
 	tsOffset = 10 * time.Second
 )
 
-// Manager runs the remux sessions.
+// Manager runs the conversion sessions.
 type Manager struct {
-	FFmpeg  string
-	Dir     string // working directory, emptied on Run
-	Workers int    // ffmpeg processes at most
-	Log     *slog.Logger
+	FFmpeg       string
+	Dir          string // working directory, emptied on Run
+	Workers      int    // ffmpeg processes at most
+	VideoWorkers int    // of them, transcoding video at most
+	Log          *slog.Logger
 	// Keyframes returns the keyframes of a file, normally from the stored
 	// index; if nil, they are read from the container index of the file.
 	Keyframes func(ctx context.Context, src Source) ([]time.Duration, error)
@@ -110,13 +137,17 @@ func (m *Manager) keyframesOf(ctx context.Context, src Source) ([]time.Duration,
 // maxPlans bounds the cached segment plans.
 const maxPlans = 512
 
-// Segments plans the segments of a file, once per Source.Key.
+// Segments plans the segments of a file: for copied video once per
+// Source.Key from its keyframes, for transcoded video at fixed times.
 func (m *Manager) Segments(ctx context.Context, src Source) ([]Segment, error) {
 	p, err := m.planOf(ctx, src)
 	return p.segments, err
 }
 
 func (m *Manager) planOf(ctx context.Context, src Source) (plan, error) {
+	if src.Video != nil {
+		return plan{segments: FixedSegments(src.Duration)}, nil
+	}
 	m.mu.Lock()
 	p, ok := m.plans[src.Key]
 	m.mu.Unlock()
@@ -175,6 +206,13 @@ func (m *Manager) step(src Source, p plan, n int) (string, bool, error) {
 	key := src.session()
 	s, ok := m.sessions[key]
 	if !ok {
+		if src.Owner != "" {
+			for k, o := range m.sessions {
+				if o.src.Owner == src.Owner {
+					m.end(k, o)
+				}
+			}
+		}
 		s = &session{src: src, plan: p, dir: filepath.Join(m.Dir, key), made: map[int]bool{}}
 		m.sessions[key] = s
 	}
@@ -186,19 +224,27 @@ func (m *Manager) step(src Source, p plan, n int) (string, bool, error) {
 		m.pace(s)
 		return path, true, nil
 	}
+	gap := restartGap
+	if src.Video != nil {
+		gap = restartGapTranscode
+	}
 	if r != nil && n >= r.first && n >= r.next {
 		switch {
 		case r.exited() && r.err != nil && !r.killed():
 			return "", false, r.err
-		case !r.exited() && n <= r.next+restartGap:
+		case !r.exited() && n <= r.next+gap:
 			// It comes soon.
 			m.pace(s)
 			return path, false, nil
 		}
 	}
-	if r != nil {
+	if r != nil && !r.exited() {
 		r.stop()
-	} else if m.running() >= max(1, m.Workers) {
+	} else if !m.free(src.Video != nil) {
+		if r == nil {
+			// Nothing to keep: the player tries again later.
+			delete(m.sessions, key)
+		}
 		return "", false, ErrBusy
 	}
 	// The new run rewrites the segments from n on.
@@ -215,15 +261,46 @@ func (m *Manager) step(src Source, p plan, n int) (string, bool, error) {
 	return path, false, nil
 }
 
-// running counts the sessions with a live ffmpeg.
-func (m *Manager) running() int {
-	n := 0
-	for _, s := range m.sessions {
-		if s.run != nil && !s.run.exited() {
-			n++
+// free reports whether a new run, transcoding video or not, may start,
+// stopping the run of an idle session if that makes room.
+func (m *Manager) free(video bool) bool {
+	full := func() bool {
+		all, v := m.running()
+		return all >= max(1, m.Workers) || video && v >= max(1, m.VideoWorkers)
+	}
+	for full() {
+		var idle *session
+		for _, s := range m.sessions {
+			live := s.run != nil && !s.run.exited()
+			// A remux gives way only where all workers are taken.
+			if all, _ := m.running(); live && time.Since(s.seen) > yieldAfter && (s.src.Video != nil || all >= max(1, m.Workers)) &&
+				(idle == nil || s.seen.Before(idle.seen)) {
+				idle = s
+			}
+		}
+		if idle == nil {
+			return false
+		}
+		idle.run.stop()
+		if m.Log != nil {
+			m.Log.Info(idle.src.verb()+" yields its worker", "path", idle.src.Path, "idle", time.Since(idle.seen).Round(time.Second))
 		}
 	}
-	return n
+	return true
+}
+
+// running counts the sessions with a live ffmpeg, and of them those that
+// transcode video.
+func (m *Manager) running() (all, video int) {
+	for _, s := range m.sessions {
+		if s.run != nil && !s.run.exited() {
+			all++
+			if s.src.Video != nil {
+				video++
+			}
+		}
+	}
+	return all, video
 }
 
 // start runs ffmpeg for s from segment first on.
@@ -231,41 +308,13 @@ func (m *Manager) start(s *session, first int) (*run, error) {
 	if err := os.MkdirAll(s.dir, 0o750); err != nil {
 		return nil, err
 	}
-	segs := s.plan.segments
-	start := segs[first].Start
-	// Seek a little past the keyframe the segment starts at: an input seek
-	// lands on the keyframe at or before its target, and the keyframe's
-	// own timestamp may lie a frame after the time in the index.
-	seek := start
-	if first > 0 {
-		eps := 200 * time.Millisecond
-		for _, k := range s.plan.keyframes {
-			if k > start {
-				eps = min(eps, (k-start)/2)
-				break
-			}
-		}
-		seek += eps
-	}
-	var times []string
-	for _, seg := range segs[first+1:] {
-		times = append(times, seconds(seg.Start-start))
-	}
+	// An earlier run from the same segment left its list; it must not count
+	// for this one.
 	list := filepath.Join(s.dir, fmt.Sprintf("list-%d.csv", first))
-	args := []string{"-hide_banner", "-loglevel", "error", "-nostdin", "-y",
-		"-ss", seconds(seek), "-copyts", "-i", "file:" + s.src.Path,
-		"-map", "0:v:0", "-map", "0:" + strconv.Itoa(s.src.Audio),
-		"-c:v", "copy", "-c:a", "aac", "-ac", "2", "-b:a", "192k",
-		"-output_ts_offset", seconds(tsOffset),
-		"-f", "segment", "-segment_format", "mpegts", "-segment_format_options", "mpegts_copyts=1",
-		"-segment_start_number", strconv.Itoa(first),
-		"-segment_list", list, "-segment_list_type", "csv",
-		"-muxdelay", "0", "-muxpreload", "0"}
-	if len(times) > 0 {
-		args = append(args, "-segment_times", strings.Join(times, ","))
+	if err := os.Remove(list); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
 	}
-	args = append(args, filepath.Join(s.dir, "%d.ts"))
-	cmd := exec.Command(m.FFmpeg, args...)
+	cmd := exec.Command(m.FFmpeg, s.args(first, list)...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Start(); err != nil {
@@ -281,16 +330,72 @@ func (m *Manager) start(s *session, first int) (*run, error) {
 			}
 			r.err = fmt.Errorf("ffmpeg: %s", msg)
 			if m.Log != nil {
-				m.Log.Warn("remux failed", "path", s.src.Path, "segment", first, "err", msg)
+				m.Log.Warn(s.src.verb()+" failed", "path", s.src.Path, "segment", first, "err", msg)
 			}
 		}
 		close(r.done)
 	}()
 	if m.Log != nil {
-		m.Log.Info("remux started", "path", s.src.Path, "audio", s.src.Audio, "segment", first,
-			"at", start.Round(time.Second))
+		attrs := []any{"path", s.src.Path, "audio", s.src.Audio, "segment", first,
+			"at", s.plan.segments[first].Start.Round(time.Second)}
+		if v := s.src.Video; v != nil {
+			attrs = append(attrs, "size", fmt.Sprintf("%dx%d", v.Width, v.Height), "tonemap", v.ToneMap,
+				"deinterlace", v.Deinterlace, "subtitle", v.Subtitle)
+		}
+		m.Log.Info(s.src.verb()+" started", attrs...)
 	}
 	return r, nil
+}
+
+// args are the ffmpeg arguments of a run from segment first on, writing
+// its list of finished segments to list.
+//
+// Both kinds keep the timestamps of the file (-copyts), shifted by
+// tsOffset, so that segments from different runs fit together. Copied
+// video is cut at the keyframes of the plan; transcoded video gets a
+// keyframe every TargetDuration from where the run starts, which are the
+// segment starts of the fixed plan.
+func (s *session) args(first int, list string) []string {
+	segs := s.plan.segments
+	start := segs[first].Start
+	seek := start
+	if s.src.Video == nil && first > 0 {
+		// Seek a little past the keyframe the segment starts at: an input
+		// seek lands on the keyframe at or before its target, and the
+		// keyframe's own timestamp may lie a frame after the time in the
+		// index. A transcode decodes up to the exact time instead.
+		eps := 200 * time.Millisecond
+		for _, k := range s.plan.keyframes {
+			if k > start {
+				eps = min(eps, (k-start)/2)
+				break
+			}
+		}
+		seek += eps
+	}
+	var times []string
+	for _, seg := range segs[first+1:] {
+		times = append(times, seconds(seg.Start-start))
+	}
+	args := []string{"-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+		"-ss", seconds(seek), "-copyts", "-i", "file:" + s.src.Path}
+	if v := s.src.Video; v != nil {
+		args = append(args, "-filter_complex", v.filter(), "-map", "[v]", "-map", "0:"+strconv.Itoa(s.src.Audio))
+		args = append(args, x264Args...)
+		args = append(args, "-force_key_frames", fmt.Sprintf("expr:gte(t,n_forced*%g)", TargetDuration.Seconds()))
+	} else {
+		args = append(args, "-map", "0:v:0", "-map", "0:"+strconv.Itoa(s.src.Audio), "-c:v", "copy")
+	}
+	args = append(args, "-c:a", "aac", "-ac", "2", "-b:a", "192k",
+		"-output_ts_offset", seconds(tsOffset),
+		"-f", "segment", "-segment_format", "mpegts", "-segment_format_options", "mpegts_copyts=1",
+		"-segment_start_number", strconv.Itoa(first),
+		"-segment_list", list, "-segment_list_type", "csv",
+		"-muxdelay", "0", "-muxpreload", "0")
+	if len(times) > 0 {
+		args = append(args, "-segment_times", strings.Join(times, ","))
+	}
+	return append(args, filepath.Join(s.dir, "%d.ts"))
 }
 
 func seconds(d time.Duration) string { return strconv.FormatFloat(d.Seconds(), 'f', 3, 64) }
@@ -324,7 +429,9 @@ func (r *run) exited() bool {
 	}
 }
 
-// refresh reads the latest run's list of finished segments.
+// refresh reads the latest run's list of finished segments. Only the
+// segments new since the last reading count: those read before may have
+// been deleted behind the player since.
 func (s *session) refresh() {
 	r := s.run
 	if r == nil {
@@ -338,9 +445,9 @@ func (s *session) refresh() {
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
 		name, _, _ := strings.Cut(sc.Text(), ",")
-		if n, err := strconv.Atoi(strings.TrimSuffix(name, ".ts")); err == nil {
+		if n, err := strconv.Atoi(strings.TrimSuffix(name, ".ts")); err == nil && n >= r.next {
 			s.made[n] = true
-			r.next = max(r.next, n+1)
+			r.next = n + 1
 		}
 	}
 }
@@ -411,13 +518,20 @@ func (m *Manager) end(key string, s *session) {
 	os.RemoveAll(s.dir)
 	delete(m.sessions, key)
 	if m.Log != nil {
-		m.Log.Info("remux ended", "path", s.src.Path)
+		m.Log.Info(s.src.verb()+" ended", "path", s.src.Path)
 	}
 }
 
-// Sessions is the number of sessions, for the admin UI.
-func (m *Manager) Sessions() int {
+// Sessions counts the sessions, and of them those that transcode video,
+// for the admin UI.
+func (m *Manager) Sessions() (all, video int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return len(m.sessions)
+	for _, s := range m.sessions {
+		all++
+		if s.src.Video != nil {
+			video++
+		}
+	}
+	return all, video
 }
