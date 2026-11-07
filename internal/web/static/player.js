@@ -21,21 +21,27 @@
 	const subChoice = document.getElementById("subchoice");
 	const subSelect = subChoice.querySelector("select");
 	const errorText = errorBox.textContent;
-	// Safari's own HLS is the reference; other browsers that play HLS
-	// themselves (Chrome since 2025) go through hls.js where it works, which
-	// tells a busy server from a broken stream and tries again.
+	// HLS goes through hls.js wherever it works, also in browsers that play
+	// HLS themselves (Safari, Chrome since 2025): it tells a busy server from
+	// a broken stream and tries again. The browser's own HLS is the fallback.
 	const hlsJS = window.Hls && window.Hls.isSupported();
-	const nativeHLS = video.canPlayType("application/vnd.apple.mpegurl") !== "" &&
-		(!hlsJS || /Apple/.test(navigator.vendor));
+	const nativeHLS = !hlsJS && video.canPlayType("application/vnd.apple.mpegurl") !== "";
 	let index = cfg.part;
 	let audio = null;
 	let burn = null; // stream index of the image subtitle burnt in
 	let hls = null;
-	let started = false;
+	let started = false; // the part has played
+	let moved = false; // and its position is worth keeping
 	let lastReport = 0;
 
 	// report sends the position; on leaving the page only a beacon gets out.
+	// Until the part has really played, only its start is reported: a
+	// position of 0 from a player still loading would wipe out where the
+	// user stopped.
 	function report(event, beacon) {
+		if (event !== "start" && !moved) {
+			return;
+		}
 		const part = cfg.parts[index];
 		const body = new URLSearchParams({
 			csrf: cfg.csrf, item: part.item, source: part.source, event: event,
@@ -142,6 +148,9 @@
 			});
 			hls.loadSource(src.url);
 			hls.attachMedia(video);
+			// Asked at once, so that the click that opened the player counts
+			// as the user's wish to play.
+			video.play().catch(() => {});
 			return;
 		}
 		video.src = src.url;
@@ -149,13 +158,14 @@
 			if (at > 0 && at < video.duration) {
 				video.currentTime = at;
 			}
-			video.play().catch(() => {});
 		}, { once: true });
+		video.play().catch(() => {});
 	}
 
 	function load(i, at, track, sub) {
 		index = i;
 		started = false;
+		moved = false;
 		const part = cfg.parts[i];
 		audio = track === undefined || track === null ? defaultAudio(part) : track;
 		burn = sub === undefined ? defaultBurn(part) : sub;
@@ -218,6 +228,9 @@
 		}
 	});
 	video.addEventListener("timeupdate", () => {
+		if (started && !video.paused && !video.seeking && video.currentTime > 0) {
+			moved = true;
+		}
 		const now = Date.now();
 		if (!video.paused && now - lastReport > 10000) {
 			lastReport = now;
@@ -230,6 +243,12 @@
 		}
 	});
 	video.addEventListener("ended", () => {
+		const part = cfg.parts[index];
+		if (part.duration > 0 && video.currentTime < part.duration - 120) {
+			// Not the end of the movie: the stream broke off.
+			showError();
+			return;
+		}
 		report("stop");
 		if (index + 1 < cfg.parts.length) {
 			load(index + 1, 0);
@@ -248,5 +267,26 @@
 		}
 	});
 
-	load(index, cfg.start);
+	if (root.dataset.inline === undefined) {
+		load(index, cfg.start);
+		return;
+	}
+	// On a movie page the player opens in place when a play link is
+	// clicked, and that click starts it; links opened otherwise, as in a new
+	// tab, lead to the player page.
+	const box = document.getElementById("inlineplayer");
+	for (const a of document.querySelectorAll("a[data-play]")) {
+		a.addEventListener("click", (e) => {
+			if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
+				return;
+			}
+			e.preventDefault();
+			if (started) {
+				report("progress");
+			}
+			box.hidden = false;
+			load(Number(a.dataset.part) || 0, Number(a.dataset.t) || 0);
+			box.scrollIntoView({ block: "start", behavior: "smooth" });
+		});
+	}
 })();

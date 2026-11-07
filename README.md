@@ -169,9 +169,12 @@ grouping into collections; search over movies, people and collections;
 details with cast and crew, versions, audio and subtitle tracks and similar
 movies; collection and person pages; and an account page to change the
 password, add and remove passkeys, connect apps with Quick Connect and
-sign out devices. The player plays a movie's parts one after
-another and keeps the position in sync with Jellyfin clients, and offers
-the audio tracks of a file. What browsers decode themselves (h264 with AAC
+sign out devices. The player opens on the movie page, so that the
+click on play starts it (Safari and Firefox let a page play sound only
+after a click on that page); it plays a movie's parts one after another,
+keeps the position in sync with Jellyfin clients, and offers the audio
+tracks and subtitles of a file. HLS goes through hls.js wherever it works,
+also in Safari. What browsers decode themselves (h264 with AAC
 or MP3 in MP4) plays as it is. Other h264 files, such as MKV with AC3,
 DTS or TrueHD, and other audio tracks, are remuxed on the fly: the video
 is copied, the audio converted to AAC, and the player gets HLS, cut at the

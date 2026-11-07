@@ -1,6 +1,9 @@
 {{define "title"}}{{.Data.Name}}{{end}}
+{{define "scripts"}}{{if .Data.Config}}<script src="{{asset "hls-1.7.3.light.min.js"}}" defer></script>
+<script src="{{asset "player.js"}}" defer></script>{{end}}{{end}}
 {{define "content"}}
 {{$ := .}}
+{{if .Data.Config}}<div class="playerpage" id="inlineplayer" hidden><div id="player" data-inline data-config="{{.Data.Config}}">{{template "player" .}}</div></div>{{end}}
 {{with .Data.Backdrop}}<div class="backdrop"><img src="{{.}}" alt=""></div>{{end}}
 <article class="details">
 	<div class="cover">{{with .Data.Poster}}<img src="{{.}}" alt="">{{end}}</div>
@@ -19,8 +22,8 @@
 		{{with .Data.Tagline}}<p class="tagline">{{.}}</p>{{end}}
 		<div class="actions">
 			{{if .Data.Playable}}
-				{{with .Data.ResumeURL}}<a class="button primary" href="{{.}}">▶ {{t "resume"}} {{$.Data.ResumeAt}}{{with $.Data.ResumePart}} ({{t "part"}} {{.}}){{end}}</a>{{end}}
-				<a class="button{{if not .Data.ResumeURL}} primary{{end}}" href="{{.Data.PlayURL}}">{{if .Data.ResumeURL}}{{t "fromStart"}}{{else}}▶ {{t "play"}}{{end}}</a>
+				{{with .Data.ResumeURL}}<a class="button primary" href="{{.}}" data-play data-part="{{$.Data.ResumePartIndex}}" data-t="{{$.Data.ResumeSeconds}}">▶ {{t "resume"}} {{$.Data.ResumeAt}}{{with $.Data.ResumePart}} ({{t "part"}} {{.}}){{end}}</a>{{end}}
+				<a class="button{{if not .Data.ResumeURL}} primary{{end}}" href="{{.Data.PlayURL}}" data-play data-part="0" data-t="0">{{if .Data.ResumeURL}}{{t "fromStart"}}{{else}}▶ {{t "play"}}{{end}}</a>
 			{{end}}
 			<form method="post" action="/web/movies/{{.Data.Movie.ID}}/played">{{template "csrf" .}}<input type="hidden" name="played" value="{{if .Data.Played}}off{{else}}on{{end}}"><button>{{if .Data.Played}}{{t "markUnplayed"}}{{else}}{{t "markPlayed"}}{{end}}</button></form>
 			<form method="post" action="/web/movies/{{.Data.Movie.ID}}/favorite">{{template "csrf" .}}<input type="hidden" name="favorite" value="{{if .Data.Favorite}}off{{else}}on{{end}}"><button aria-pressed="{{if .Data.Favorite}}true{{else}}false{{end}}">{{if .Data.Favorite}}♥ {{t "favorite"}}{{else}}♡ {{t "favorite"}}{{end}}</button></form>

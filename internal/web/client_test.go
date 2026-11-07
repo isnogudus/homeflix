@@ -191,6 +191,15 @@ func TestProgressAndResume(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), "Fortsetzen bei 30:05") || !strings.Contains(rec.Body.String(), "t=1805") {
 		t.Errorf("resume button: %s", rec.Body.String())
 	}
+	// The player opens on the movie page, started by the click.
+	body := rec.Body.String()
+	if !strings.Contains(body, `data-play data-part="0" data-t="1805"`) || !strings.Contains(body, `data-play data-part="0" data-t="0"`) ||
+		!strings.Contains(body, `id="player" data-inline`) || !strings.Contains(body, "player.js") {
+		t.Errorf("player on the movie page: %s", body)
+	}
+	if cfg := playerConfig(t, body); len(cfg["parts"].([]any)) != 1 {
+		t.Errorf("inline player config: %v", cfg)
+	}
 	if rec := f.do(lan, "GET", "/web/", nil, c); !strings.Contains(rec.Body.String(), "Weiterschauen") {
 		t.Error("home lacks continue watching")
 	}

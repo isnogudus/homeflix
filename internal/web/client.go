@@ -431,6 +431,16 @@ func (s *Server) movie(w http.ResponseWriter, r *http.Request, sess *session) {
 	ud := user[m.ID]
 	d["Played"], d["Favorite"] = ud.Played, ud.IsFavorite
 	if mode != "" {
+		// The player opens on this page, so that the click on play
+		// starts it: browsers let a page play sound only after the user
+		// acted on it. The links still lead to the player page.
+		config, err := s.playerConfig(m, version, sess, 0, 0)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		d["Config"] = config
+		d["PlayerPoster"] = imageURL(m.ID, "Backdrop", images.Tag(m, images.Backdrop), 1280, 0)
 		d["PlayURL"] = playURL(m, version, 0, 0)
 		// A later part may be where the user stopped.
 		for i := len(version.Parts) - 1; i >= 0; i-- {
@@ -440,6 +450,7 @@ func (s *Server) movie(w http.ResponseWriter, r *http.Request, sess *session) {
 			}
 			if pos := user[id].Position; pos > 0 {
 				d["ResumeURL"], d["ResumeAt"] = playURL(m, version, i, pos), clock(pos)
+				d["ResumePartIndex"], d["ResumeSeconds"] = i, int(pos.Seconds())
 				if len(version.Parts) > 1 {
 					d["ResumePart"] = i + 1
 				}
@@ -623,6 +634,23 @@ func (s *Server) play(w http.ResponseWriter, r *http.Request, sess *session) {
 		s.render(w, r, http.StatusOK, "play", sess, d)
 		return
 	}
+	part, _ := strconv.Atoi(r.URL.Query().Get("part"))
+	at, _ := strconv.Atoi(r.URL.Query().Get("t"))
+	config, err := s.playerConfig(m, version, sess, part, at)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	d["Config"] = config
+	d["PlayerPoster"] = imageURL(m.ID, "Backdrop", images.Tag(m, images.Backdrop), 1280, 0)
+	s.render(w, r, http.StatusOK, "play", sess, d)
+}
+
+// playerConfig is the configuration of the player script for a version
+// of a movie, starting with part at start seconds. The player page and the
+// movie page, where it opens in place, carry it in a data attribute,
+// which the template escapes like any attribute value.
+func (s *Server) playerConfig(m *catalog.Movie, version *catalog.Version, sess *session, part, start int) (string, error) {
 	var parts []playerPart
 	for i, p := range version.Parts {
 		item := m.ID
@@ -657,21 +685,11 @@ func (s *Server) play(w http.ResponseWriter, r *http.Request, sess *session) {
 		}
 		parts = append(parts, pp)
 	}
-	part, _ := strconv.Atoi(r.URL.Query().Get("part"))
 	part = min(max(part, 0), len(parts)-1)
-	start, _ := strconv.Atoi(r.URL.Query().Get("t"))
 	config, err := json.Marshal(map[string]any{"parts": parts, "part": part, "start": max(start, 0), "csrf": sess.CSRF(),
 		"back": "/web/movies/" + m.ID, "partLabel": s.text("part"), "busy": s.text("remuxBusy"),
 		"noSubtitles": s.text("noSubtitles"), "burnLabel": s.text("burnIn")})
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	// The player script reads it from a data attribute, which the template
-	// escapes like any attribute value.
-	d["Config"] = string(config)
-	d["Poster"] = imageURL(m.ID, "Backdrop", images.Tag(m, images.Backdrop), 1280, 0)
-	s.render(w, r, http.StatusOK, "play", sess, d)
+	return string(config), err
 }
 
 func (s *Server) account(w http.ResponseWriter, r *http.Request, sess *session) {
