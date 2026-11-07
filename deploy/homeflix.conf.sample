@@ -46,3 +46,20 @@
 #	path $movies/films
 #	path "/media/more movies"
 #}
+
+# A music library is read from the tags of its files: each audio file is
+# a track; albums and artists come from the album, album artist and artist
+# tags. album.nfo and artist.nfo files take precedence over the tags.
+#library "Music" {
+#	type music
+#	path /media/music/flac
+#	path /media/music/mp3
+#}
+
+# An audiobook is a single file (m4b, mp3, ...) or a folder of files that
+# play one after another. Audiobookshelf's metadata.json and cover.jpg are
+# read when they are there.
+#library "Audiobooks" {
+#	type audiobooks
+#	path /media/audiobooks
+#}

@@ -1,0 +1,21 @@
+{{define "title"}}{{.Data.Artist.Name}}{{end}}
+{{define "content"}}
+{{$a := .Data.Artist}}
+<article class="detail music"{{with .Data.Backdrop}} style="--backdrop: url('{{.}}')"{{end}} data-queue="{{.Data.AllQueue}}">
+	<div class="cover round">{{if .Data.Picture}}<img src="{{.Data.Picture}}" alt="">{{end}}</div>
+	<div class="info">
+		<p class="kicker">{{t "artist"}}</p>
+		<h1>{{$a.Name}}</h1>
+		{{with $a.Genres}}<p class="genres">{{range .}}<span>{{.}}</span>{{end}}</p>{{end}}
+		<div class="actions">
+			{{if .Data.Albums}}<button class="primary" type="button" data-shuffle>{{t "shuffle"}}</button>{{end}}
+			{{template "favorite" (dict "ID" $a.ID "On" .Data.Favorite "Back" (print "/web/music/artists/" $a.ID) "Session" .Session)}}
+		</div>
+		{{with $a.Overview}}<p class="overview">{{.}}</p>{{end}}
+	</div>
+</article>
+{{with .Data.Albums}}<section class="row"><h2>{{t "albums"}}</h2><div class="square">{{template "cards" .}}</div></section>{{end}}
+{{with .Data.Guest}}<section class="row" data-queue="{{$.Data.Queue}}"><h2>{{t "appearsOn"}}</h2>{{template "tracklist" (dict "Rows" . "Session" $.Session)}}</section>{{end}}
+{{with .Data.Books}}<section class="row"><h2>{{t "audiobooks"}}</h2><div class="square">{{template "cards" .}}</div></section>{{end}}
+{{with .Data.Similar}}<section class="row"><h2>{{t "similar"}}</h2><div class="square">{{template "cards" .}}</div></section>{{end}}
+{{end}}

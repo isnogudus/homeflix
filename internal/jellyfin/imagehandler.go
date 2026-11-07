@@ -37,12 +37,20 @@ func (s *Server) itemImage(w http.ResponseWriter, r *http.Request) {
 		s.collectionImage(w, r, c, kind)
 		return
 	}
+	if art, ok := audioArt(snap, id, kind); ok {
+		s.artImage(w, r, art)
+		return
+	}
+	if kind == images.Logo {
+		http.NotFound(w, r)
+		return
+	}
 	m, ok := snap.Item(id)
 	if !ok {
 		// Later parts of a movie show the movie's artwork.
 		p, isPart := snap.Part(id)
 		if !isPart {
-			http.NotFound(w, r)
+			s.playlistImage(w, r, snap, id, kind)
 			return
 		}
 		m = p.Movie
@@ -63,6 +71,79 @@ func (s *Server) itemImage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.Log.Warn("image unavailable", "item", m.Title, "type", kind, "err", err)
+		http.NotFound(w, r)
+		return
+	}
+	s.serveImage(w, r, path, tag)
+}
+
+// audioArt finds the picture of a kind of an album, artist, track or
+// book; ok is false when the ID is none of these.
+func audioArt(snap *catalog.Snapshot, id string, kind images.Kind) (catalog.Art, bool) {
+	if kind == images.Thumb {
+		kind = images.Backdrop
+	}
+	if al, ok := snap.Album(id); ok {
+		if kind == images.Primary {
+			return al.Cover, true
+		}
+		if len(al.Artists) > 0 {
+			return al.Artists[0].Image(string(kind)), true
+		}
+		return catalog.Art{}, true
+	}
+	if a, ok := snap.Artist(id); ok {
+		return a.Image(string(kind)), true
+	}
+	m, ok := snap.Item(id)
+	switch {
+	case !ok:
+		return catalog.Art{}, false
+	case m.Track != nil:
+		if kind == images.Primary {
+			return trackCover(m), true
+		}
+		if len(m.Track.AlbumArtists) > 0 {
+			return m.Track.AlbumArtists[0].Image(string(kind)), true
+		}
+		return catalog.Art{}, true
+	case m.Book != nil:
+		if kind == images.Primary {
+			return m.Book.Cover, true
+		}
+		return catalog.Art{}, true
+	}
+	return catalog.Art{}, false
+}
+
+// playlistImage serves the cover of a playlist: that of its first entry
+// with one.
+func (s *Server) playlistImage(w http.ResponseWriter, r *http.Request, snap *catalog.Snapshot, id string, kind images.Kind) {
+	p, err := s.Store.Playlist(r.Context(), id)
+	if err != nil || kind != images.Primary {
+		http.NotFound(w, r)
+		return
+	}
+	art, ok := playlistArt(snap, p)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	s.artImage(w, r, art)
+}
+
+// artImage serves a picture of music or a book.
+func (s *Server) artImage(w http.ResponseWriter, r *http.Request, art catalog.Art) {
+	tag := images.ArtTag(art)
+	if tag == "" {
+		http.NotFound(w, r)
+		return
+	}
+	path, err := s.Images.Art(r.Context(), art, imageSize(r))
+	if err != nil {
+		if !errors.Is(err, images.ErrNoImage) && r.Context().Err() == nil {
+			s.Log.Warn("image unavailable", "file", art.File+art.Embedded, "err", err)
+		}
 		http.NotFound(w, r)
 		return
 	}

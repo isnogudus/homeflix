@@ -92,8 +92,12 @@ func scanCommand(args []string, cio cliIO) error {
 
 func printReport(w io.Writer, rep library.Report) {
 	for _, l := range rep.Libraries {
-		fmt.Fprintf(w, "%s: %d movies (%d added, %d updated, %d moved, %d returned, %d missing); files %d added, %d changed, %d removed\n",
-			l.Name, l.Movies, l.Added, l.Updated, l.Moved, l.Returned, l.Missing, l.FilesAdded, l.FilesChanged, l.FilesRemoved)
+		unit := l.Unit
+		if unit == "" {
+			unit = "movies"
+		}
+		fmt.Fprintf(w, "%s: %d %s (%d added, %d updated, %d moved, %d returned, %d missing); files %d added, %d changed, %d removed\n",
+			l.Name, l.Movies, unit, l.Added, l.Updated, l.Moved, l.Returned, l.Missing, l.FilesAdded, l.FilesChanged, l.FilesRemoved)
 		for _, p := range l.UnavailablePaths {
 			fmt.Fprintf(w, "  unavailable: %s\n", p)
 		}

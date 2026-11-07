@@ -47,8 +47,9 @@ func TestSampleStatementsParseWhenEnabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("enabled sample:\n%s\n%v", src, err)
 	}
-	if len(cfg.Libraries) != 1 || len(cfg.Libraries[0].Paths) != 2 {
-		t.Errorf("sample library: %+v", cfg.Libraries)
+	if len(cfg.Libraries) != 3 || len(cfg.Libraries[0].Paths) != 2 || cfg.Libraries[1].Type != Music ||
+		cfg.Libraries[2].Type != Audiobooks {
+		t.Errorf("sample libraries: %+v", cfg.Libraries)
 	}
 }
 

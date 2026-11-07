@@ -1,0 +1,17 @@
+{{define "title"}}{{.Data.Playlist.Name}}{{end}}
+{{define "content"}}
+{{$p := .Data.Playlist}}
+<article class="detail music" data-queue="{{.Data.Queue}}">
+	<div class="info">
+		<p class="kicker">{{t "playlist"}}</p>
+		<h1>{{$p.Name}}</h1>
+		<p class="meta">{{len .Data.Tracks}} {{t "tracks"}}{{if .Data.Missing}} · {{.Data.Missing}} {{t "missingEntries"}}{{end}}</p>
+		<div class="actions">
+			{{if .Data.Tracks}}<button class="primary" type="button" data-play="0">▶ {{t "play"}}</button>
+			<button type="button" data-shuffle>{{t "shuffle"}}</button>{{end}}
+			<form method="post" action="/web/music/playlists/{{$p.ID}}/delete">{{template "csrf" .}}<button class="danger">{{t "deletePlaylist"}}</button></form>
+		</div>
+	</div>
+</article>
+{{template "tracklist" (dict "Rows" .Data.Tracks "Playlist" $p.ID "Session" .Session)}}
+{{end}}

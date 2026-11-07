@@ -1,0 +1,11 @@
+{{define "title"}}{{t "audiobooks"}}{{end}}
+{{define "content"}}
+{{with .Data.Continue}}<section class="row"><h2>{{t "continueListening"}}</h2><div class="square">{{template "cards" .}}</div></section>{{end}}
+<div class="toolbar">
+	<h1>{{if .Data.Author}}{{.Data.Author}} <a class="clear" href="{{.Data.ClearAuthor}}" aria-label="{{t "clearFilter"}}">×</a>{{else}}{{t "audiobooks"}}{{end}} <span class="count">{{.Data.Total}}</span></h1>
+	{{with .Data.Grid}}<nav class="pills" aria-label="{{t "sortBy"}}">{{range .Sorts}}<a href="{{.URL}}"{{if .Current}} aria-current="page"{{end}}>{{t .Label}}</a>{{end}}</nav>{{end}}
+</div>
+{{with .Data.Grid}}{{template "letters" .}}{{end}}
+{{if .Data.Cards}}<div class="square">{{template "cards" .Data.Cards}}</div>{{else}}<p class="note">{{t "nothingHere"}}</p>{{end}}
+{{with .Data.Grid}}{{template "pager" .}}{{end}}
+{{end}}

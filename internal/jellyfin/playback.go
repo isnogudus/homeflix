@@ -37,6 +37,7 @@ type playbackInfoRequest struct {
 	DeviceProfile       *profile.DeviceProfile
 	EnableDirectPlay    *bool
 	EnableDirectStream  *bool
+	EnableTranscoding   *bool
 }
 
 // PlaybackInfoResponse lists the sources a client may play.
@@ -120,6 +121,10 @@ func (s *Server) playbackInfo(w http.ResponseWriter, r *http.Request, sess *Sess
 	}
 	resp := PlaybackInfoResponse{PlaySessionID: sessionID}
 	for _, src := range sources {
+		if isAudioItem(src.Movie) {
+			resp.MediaSources = append(resp.MediaSources, s.audioPlaybackSource(r, sess, &req, src, itemID, sessionID))
+			continue
+		}
 		part := src.Part()
 		dto := sourceDto(src.Movie, src.Version, src.Index, false)
 		dto.ID = src.ID
@@ -155,12 +160,65 @@ func (s *Server) playbackInfo(w http.ResponseWriter, r *http.Request, sess *Sess
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// audioPlaybackSource decides how a track or audiobook plays: the file
+// itself when the client's profile takes it, else the AAC conversion as
+// HLS, when the user may have audio converted.
+func (s *Server) audioPlaybackSource(r *http.Request, sess *Session, req *playbackInfoRequest, src sourceRef,
+	itemID, sessionID string) MediaSourceInfo {
+	m := src.Movie
+	var dto MediaSourceInfo
+	if m.Book != nil {
+		dto = s.bookSource(m, false)
+	} else {
+		dto = sourceDto(m, src.Version, 0, false)
+		dto.VideoType = ""
+		withGain(&dto, m)
+	}
+	dto.ID = src.ID
+	info := src.Version.Parts[0].Info
+	direct := true
+	var reasons []string
+	if req.DeviceProfile != nil {
+		d := req.DeviceProfile.Evaluate(info, -1, info.BitRate, req.MaxStreamingBitrate)
+		direct, reasons = d.DirectPlay, d.Reasons
+	}
+	if needsConversion(m) {
+		direct = false
+		reasons = append(reasons, "ContainerNotSupported")
+	}
+	if req.EnableDirectPlay != nil && !*req.EnableDirectPlay {
+		direct = false
+		reasons = append(reasons, "DirectPlayDisabled")
+	}
+	dto.SupportsDirectPlay = direct
+	dto.SupportsDirectStream = direct && (req.EnableDirectStream == nil || *req.EnableDirectStream)
+	if dto.SupportsDirectStream {
+		dto.DirectStreamURL = fmt.Sprintf("/Audio/%s/stream?Static=true&MediaSourceId=%s&PlaySessionId=%s",
+			itemID, url.QueryEscape(src.ID), sessionID)
+	}
+	convert := s.HLS != nil && mayConvertAudio(sess) && (req.EnableTranscoding == nil || *req.EnableTranscoding)
+	if !direct && convert {
+		dto.SupportsTranscoding = true
+		dto.TranscodingURL = audioTranscodingURL(itemID, src.ID, sessionID, requestToken(r))
+		dto.TranscodingContainer = "ts"
+		dto.TranscodingSubProtocol = "hls"
+	}
+	s.Log.Info("playback info", "item", m.Title, "container", dto.Container, "direct_play", direct,
+		"converted", dto.SupportsTranscoding, "reasons", strings.Join(reasons, ","),
+		"client", sess.Token.Client, "user", sess.User.Name)
+	return dto
+}
+
 // contentTypes maps file extensions to the types sent for direct play.
 var contentTypes = map[string]string{
 	".mkv": "video/x-matroska", ".mp4": "video/mp4", ".m4v": "video/x-m4v", ".mov": "video/quicktime",
 	".avi": "video/x-msvideo", ".webm": "video/webm", ".mpg": "video/mpeg", ".mpeg": "video/mpeg",
 	".ts": "video/mp2t", ".m2ts": "video/mp2t", ".wmv": "video/x-ms-wmv", ".flv": "video/x-flv",
 	".ogv": "video/ogg", ".3gp": "video/3gpp",
+	".mp3": "audio/mpeg", ".flac": "audio/flac", ".m4a": "audio/mp4", ".m4b": "audio/mp4", ".aac": "audio/aac",
+	".ogg": "audio/ogg", ".oga": "audio/ogg", ".opus": "audio/ogg", ".wma": "audio/x-ms-wma", ".wav": "audio/wav",
+	".mpc": "audio/x-musepack", ".ape": "audio/x-ape", ".wv": "audio/x-wavpack", ".aif": "audio/aiff",
+	".aiff": "audio/aiff", ".mka": "audio/x-matroska", ".dsf": "audio/dsf",
 }
 
 // resolveFile finds the file a stream request is for.

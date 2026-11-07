@@ -92,9 +92,18 @@ type TMDB struct {
 // DefaultRefreshInterval is the refresh interval without a statement.
 const DefaultRefreshInterval = 90 * 24 * time.Hour
 
-// Library is one movie library made of one or more directories.
+// Library types.
+const (
+	Movies     = "movies"
+	Music      = "music"
+	Audiobooks = "audiobooks"
+)
+
+// Library is one library made of one or more directories. Type is Movies,
+// Music or Audiobooks.
 type Library struct {
 	Name  string
+	Type  string
 	Paths []string
 }
 
@@ -143,7 +152,7 @@ func DefaultAdminFrom() []netip.Prefix {
 var keywords = []string{
 	"admin", "articles", "data", "directory", "discovery", "ffmpeg", "ffprobe", "file", "from", "image",
 	"interval", "language", "level", "library", "listen", "log", "name", "no", "on", "origin", "passkeys", "path",
-	"port", "probe", "proxy", "quickconnect", "refresh", "scan", "server", "sort", "tmdb", "token", "transcode", "trusted", "video", "workers",
+	"port", "probe", "proxy", "quickconnect", "refresh", "scan", "server", "sort", "tmdb", "token", "transcode", "trusted", "type", "video", "workers",
 }
 
 // Load reads the configuration file at path; "-" reads standard input. On
@@ -488,9 +497,31 @@ func (p *parser) library() bool {
 		return false
 	}
 	p.seen[key] = kw.Pos
-	lib := Library{Name: name}
+	lib := Library{Name: name, Type: Movies}
 	errsBefore := len(p.Errors())
+	typed := false
 	ok = p.Block("library", func() bool {
+		if p.Is("type") {
+			pos := p.Tok().Pos
+			p.Next()
+			if typed {
+				p.Errorf(pos, "library %q has more than one type", name)
+				return false
+			}
+			typed = true
+			switch {
+			case p.Accept(Movies):
+				lib.Type = Movies
+			case p.Accept(Music):
+				lib.Type = Music
+			case p.Accept(Audiobooks):
+				lib.Type = Audiobooks
+			default:
+				p.Errorf(p.Tok().Pos, "library type must be movies, music or audiobooks, not %q", p.Tok().Text)
+				return false
+			}
+			return true
+		}
 		if !p.Accept("path") {
 			p.Errorf(p.Tok().Pos, "unknown statement %q in library block", p.Tok().Text)
 			return false

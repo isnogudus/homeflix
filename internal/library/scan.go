@@ -2,6 +2,7 @@ package library
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -13,8 +14,27 @@ import (
 
 	"homeflix/internal/config"
 	"homeflix/internal/lockfile"
+	"homeflix/internal/media"
 	"homeflix/internal/store"
 )
+
+// CollectionType is the Jellyfin collection type of a library type.
+func CollectionType(libType string) string {
+	switch libType {
+	case config.Music:
+		return "music"
+	case config.Audiobooks:
+		return "books"
+	}
+	return "movies"
+}
+
+func (e Entry) itemType() string {
+	if e.Type == "" {
+		return "Movie"
+	}
+	return e.Type
+}
 
 // Prober reads stream information from a file.
 type Prober interface {
@@ -48,7 +68,8 @@ type Scanner struct {
 // LibraryReport counts what a scan changed in one library.
 type LibraryReport struct {
 	Name             string
-	Movies           int // movies found on disk
+	Unit             string // what Movies counts: "movies", "tracks" or "books"
+	Movies           int    // movies (tracks, books) found on disk
 	Added            int
 	Updated          int // title, year, IDs or location changed
 	Moved            int // recognised by content or IMDb ID after a rename
@@ -57,6 +78,7 @@ type LibraryReport struct {
 	FilesAdded       int
 	FilesChanged     int
 	FilesRemoved     int
+	SidecarsChanged  int // descriptions, pictures or lyrics added, changed or removed
 	UnavailablePaths []string
 }
 
@@ -75,7 +97,7 @@ func (r Report) Changed() bool {
 		return true
 	}
 	for _, l := range r.Libraries {
-		if l.Added+l.Updated+l.Moved+l.Returned+l.Missing+l.FilesAdded+l.FilesChanged+l.FilesRemoved > 0 {
+		if l.Added+l.Updated+l.Moved+l.Returned+l.Missing+l.FilesAdded+l.FilesChanged+l.FilesRemoved+l.SidecarsChanged > 0 {
 			return true
 		}
 	}
@@ -133,19 +155,36 @@ func (s *Scanner) Scan(ctx context.Context) (Report, error) {
 
 func (s *Scanner) scanLibrary(ctx context.Context, lib config.Library) (LibraryReport, error) {
 	rep := LibraryReport{Name: lib.Name}
-	dbLib, err := s.Store.EnsureLibrary(ctx, lib.Name, "movies")
+	dbLib, err := s.Store.EnsureLibrary(ctx, lib.Name, CollectionType(lib.Type))
 	if err != nil {
 		return rep, err
 	}
 	var entries []Entry
+	var sidecars []Sidecar
 	for _, root := range lib.Paths {
-		es, err := Walk(root, s.Log)
+		var es []Entry
+		var sc []Sidecar
+		switch lib.Type {
+		case config.Music:
+			es, sc, err = WalkMusic(root, s.Log)
+		case config.Audiobooks:
+			es, sc, err = WalkAudiobooks(root, s.Log)
+		default:
+			es, err = Walk(root, s.Log)
+		}
 		if err != nil {
-			s.Log.Error("library path unavailable; its movies are left as they are", "library", lib.Name, "path", root, "err", err)
+			s.Log.Error("library path unavailable; its items are left as they are", "library", lib.Name, "path", root, "err", err)
 			rep.UnavailablePaths = append(rep.UnavailablePaths, root)
 			continue
 		}
 		entries = append(entries, es...)
+		sidecars = append(sidecars, sc...)
+	}
+	sidecarsChanged := 0
+	if lib.Type == config.Music || lib.Type == config.Audiobooks {
+		if sidecarsChanged, err = s.updateSidecars(ctx, dbLib.ID, sidecars, rep.UnavailablePaths); err != nil {
+			return rep, fmt.Errorf("sidecar files: %w", err)
+		}
 	}
 	existing, err := s.Store.LibraryItems(ctx, dbLib.ID)
 	if err != nil {
@@ -155,7 +194,15 @@ func (s *Scanner) scanLibrary(ctx context.Context, lib config.Library) (LibraryR
 	if err := d.run(entries, rep.UnavailablePaths); err != nil {
 		return rep, err
 	}
-	d.rep.Name, d.rep.UnavailablePaths = lib.Name, rep.UnavailablePaths
+	d.rep.Name, d.rep.UnavailablePaths, d.rep.SidecarsChanged = lib.Name, rep.UnavailablePaths, sidecarsChanged
+	switch lib.Type {
+	case config.Music:
+		d.rep.Unit = "tracks"
+	case config.Audiobooks:
+		d.rep.Unit = "books"
+	default:
+		d.rep.Unit = "movies"
+	}
 	if !d.ch.Empty() {
 		if err := s.Store.ApplyScan(ctx, d.ch); err != nil {
 			return rep, err
@@ -344,7 +391,7 @@ func (d *diff) addMovie(e Entry) error {
 	it := store.Item{
 		ID:          id,
 		LibraryID:   d.libraryID,
-		Type:        "Movie",
+		Type:        e.itemType(),
 		Path:        e.Path,
 		Title:       e.Name.Title,
 		SortTitle:   SortKey(e.Name.Title, d.articles),
@@ -363,7 +410,7 @@ func (d *diff) addMovie(e Entry) error {
 
 func (d *diff) updateMovie(old *store.Item, e Entry) error {
 	upd := *old
-	upd.ParentID, upd.Type, upd.ExtraType = "", "Movie", ""
+	upd.ParentID, upd.Type, upd.ExtraType = "", e.itemType(), ""
 	upd.Path = e.Path
 	upd.Title, upd.SortTitle = e.Name.Title, SortKey(e.Name.Title, d.articles)
 	upd.Year, upd.IMDbID, upd.TMDbID = e.Name.Year, e.Name.IMDbID, e.Name.TMDbID
@@ -518,6 +565,13 @@ func (s *Scanner) probeAll(ctx context.Context) (probed, failed int, err error) 
 				if ctx.Err() != nil {
 					return
 				}
+				if r.Err == "" && IsAudio(f.Path) {
+					if a, err := media.ParseAudio(r.JSON); err != nil {
+						r = store.ProbeResult{Err: err.Error()}
+					} else if b, err := json.Marshal(a); err == nil {
+						r.AudioMeta = string(b)
+					}
+				}
 				err := s.Store.SetProbeResult(ctx, f, r, s.now())
 				mu.Lock()
 				switch {
@@ -553,4 +607,52 @@ feed:
 		return probed, failed, firstErr
 	}
 	return probed, failed, ctx.Err()
+}
+
+// updateSidecars stores the sidecar files found in a library, reading the
+// descriptions that are new or changed. Sidecars under paths that could
+// not be read are kept as they were.
+func (s *Scanner) updateSidecars(ctx context.Context, libraryID string, found []Sidecar, unavailable []string) (int, error) {
+	old, err := s.Store.Sidecars(ctx, libraryID)
+	if err != nil {
+		return 0, err
+	}
+	byPath := map[string]store.Sidecar{}
+	for _, sc := range old {
+		byPath[sc.Path] = sc
+	}
+	var list []store.Sidecar
+	changed := 0
+	seen := map[string]bool{}
+	for _, f := range found {
+		seen[f.Path] = true
+		mtime := f.ModTime.Truncate(time.Millisecond).UTC()
+		if prev, ok := byPath[f.Path]; ok && prev.Size == f.Size && prev.ModTime.Equal(mtime) {
+			list = append(list, prev)
+			continue
+		}
+		changed++
+		sc := store.Sidecar{Path: f.Path, LibraryID: libraryID, Dir: filepath.Dir(f.Path),
+			Name: strings.ToLower(filepath.Base(f.Path)), Size: f.Size, ModTime: mtime}
+		data, err := ReadSidecar(f.Path)
+		if err != nil {
+			s.Log.Warn("unreadable description file", "path", f.Path, "err", err)
+		}
+		sc.Data = data
+		list = append(list, sc)
+	}
+	for _, sc := range old {
+		if seen[sc.Path] {
+			continue
+		}
+		if underAny(sc.Path, unavailable) {
+			list = append(list, sc)
+			continue
+		}
+		changed++
+	}
+	if changed == 0 {
+		return 0, nil
+	}
+	return changed, s.Store.ReplaceSidecars(ctx, libraryID, list)
 }

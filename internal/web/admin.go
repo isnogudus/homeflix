@@ -136,6 +136,16 @@ func (s *Server) adminOverview(w http.ResponseWriter, r *http.Request, sess *ses
 		}
 		d["Movies"], d["Collections"], d["People"], d["PeopleWithDetails"] =
 			len(snap.AllMovies()), len(snap.Collections()), people, withDetails
+		if snap.HasAudio() {
+			noAlbum := 0
+			for _, t := range snap.Tracks() {
+				if t.Track.Album == nil {
+					noAlbum++
+				}
+			}
+			d["Tracks"], d["Albums"], d["Artists"], d["Books"], d["NoAlbum"] =
+				len(snap.Tracks()), len(snap.Albums()), len(snap.Artists()), len(snap.Books()), noAlbum
+		}
 	}
 	mc, _, _, err := s.metaCounts(ctx)
 	if err != nil {

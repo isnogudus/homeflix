@@ -93,8 +93,8 @@ library Doku { path ${movies}_doku }
 			netip.MustParsePrefix("fd7a:115c:a1e0::/48")},
 		PasskeyOrigins: []string{"https://homeflix.example.ts.net", "https://kino.example.de:8443"},
 		Libraries: []Library{
-			{Name: "Filme", Paths: []string{"/media/movies/recent", "/media/movies/archive", "/srv/neue filme"}},
-			{Name: "Doku", Paths: []string{"/media/movies_doku"}},
+			{Name: "Filme", Type: Movies, Paths: []string{"/media/movies/recent", "/media/movies/archive", "/srv/neue filme"}},
+			{Name: "Doku", Type: Movies, Paths: []string{"/media/movies_doku"}},
 		},
 	}
 	if !reflect.DeepEqual(cfg, want) {
@@ -177,6 +177,43 @@ server name y
 	// Libraries whose paths were wrong are not also reported as empty.
 	if strings.Contains(got, `library "a" has no path`) || strings.Contains(got, `library "b" has no path`) {
 		t.Errorf("follow-up error reported:\n%s", got)
+	}
+}
+
+func TestLibraryTypes(t *testing.T) {
+	cfg, err := parseString(t, `music = "/srv/music"
+library "Musik" {
+	type music
+	path { $music/flac, $music/mp3 }
+}
+library "Hörbücher" {
+	type audiobooks
+	path /srv/audiobooks
+}
+library "Filme" {
+	path /srv/movies
+	type movies
+}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Library{
+		{Name: "Musik", Type: Music, Paths: []string{"/srv/music/flac", "/srv/music/mp3"}},
+		{Name: "Hörbücher", Type: Audiobooks, Paths: []string{"/srv/audiobooks"}},
+		{Name: "Filme", Type: Movies, Paths: []string{"/srv/movies"}},
+	}
+	if !reflect.DeepEqual(cfg.Libraries, want) {
+		t.Errorf("libraries:\n got %+v\nwant %+v", cfg.Libraries, want)
+	}
+	_, err = parseString(t, "library a {\n type songs\n path /a\n}\nlibrary b {\n type music\n type music\n path /b\n}\n")
+	for _, msg := range []string{
+		`library type must be movies, music or audiobooks, not "songs"`,
+		`library "b" has more than one type`,
+	} {
+		if err == nil || !strings.Contains(err.Error(), msg) {
+			t.Errorf("missing error %q in %v", msg, err)
+		}
 	}
 }
 

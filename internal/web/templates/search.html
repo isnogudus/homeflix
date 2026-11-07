@@ -5,9 +5,13 @@
 	<button class="primary">{{t "search"}}</button>
 </form>
 {{if .Data.Searched}}
-	{{if not (or .Data.Movies .Data.People .Data.Collections)}}<p class="note">{{t "noResults"}}</p>{{end}}
+	{{if not (or .Data.Movies .Data.People .Data.Collections .Data.Albums .Data.Artists .Data.AudioBooks .Data.Tracks)}}<p class="note">{{t "noResults"}}</p>{{end}}
 	{{with .Data.Movies}}<section class="row"><h2>{{t "movies"}} <span class="count">{{$.Data.MovieTotal}}</span></h2>{{template "cards" .}}</section>{{end}}
 	{{with .Data.Collections}}<section class="row"><h2>{{t "collections"}}</h2>{{template "cards" .}}</section>{{end}}
 	{{with .Data.People}}<section class="row"><h2>{{t "people"}}</h2>{{template "people" .}}</section>{{end}}
+	{{with .Data.Artists}}<section class="row"><h2>{{t "artists"}}</h2><div class="square">{{template "cards" .}}</div></section>{{end}}
+	{{with .Data.Albums}}<section class="row"><h2>{{t "albums"}}</h2><div class="square">{{template "cards" .}}</div></section>{{end}}
+	{{with .Data.Tracks}}<section class="row" data-queue="{{$.Data.Queue}}"><h2>{{t "tracks"}}</h2>{{template "tracklist" (dict "Rows" . "Session" $.Session)}}</section>{{end}}
+	{{with .Data.AudioBooks}}<section class="row"><h2>{{t "audiobooks"}}</h2><div class="square">{{template "cards" .}}</div></section>{{end}}
 {{end}}
 {{end}}

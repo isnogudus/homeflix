@@ -8,6 +8,8 @@
 			<dt>{{t "movies"}}</dt><dd>{{.Data.Movies}}</dd>
 			<dt>{{t "collections"}}</dt><dd>{{.Data.Collections}}</dd>
 			<dt>{{t "people"}}</dt><dd>{{.Data.People}} ({{.Data.PeopleWithDetails}} {{t "peopleDetails"}})</dd>
+			{{if .Data.Tracks}}<dt>{{t "music"}}</dt><dd>{{.Data.Tracks}} {{t "tracks"}}, {{.Data.Albums}} {{t "albums"}}, {{.Data.Artists}} {{t "artists"}}{{with .Data.NoAlbum}}; {{.}} {{t "withoutAlbum"}}{{end}}</dd>{{end}}
+			{{with .Data.Books}}<dt>{{t "audiobooks"}}</dt><dd>{{.}}</dd>{{end}}
 			<dt>{{t "users"}}</dt><dd><a href="/admin/users">{{.Data.Users}}</a></dd>
 			<dt>{{t "sessions"}}</dt><dd>{{.Data.Sessions}}</dd>
 			{{with .Data.Remuxing}}<dt>{{t "remuxing"}}</dt><dd>{{.}}{{with $.Data.Transcoding}} ({{.}} {{t "transcoding"}}){{end}}</dd>{{end}}

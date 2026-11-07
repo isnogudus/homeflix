@@ -14,8 +14,10 @@
 	</ul>
 </section>
 {{end}}
+{{with .Data.Books}}<section class="row"><h2><a href="/web/books">{{t "continueListening"}}</a></h2><div class="square">{{template "cards" .}}</div></section>{{end}}
 {{template "row" (dict "Title" "latest" "URL" "/web/movies?sort=sortAdded" "Cards" .Data.Latest)}}
+{{with .Data.NewAlbums}}<section class="row"><h2><a href="/web/music?sort=sortAdded">{{t "newAlbums"}}</a></h2><div class="square">{{template "cards" .}}</div></section>{{end}}
 {{template "row" (dict "Title" "favorites" "URL" "/web/movies?show=favorites" "Cards" .Data.Favorites)}}
 {{template "row" (dict "Title" "collections" "URL" "/web/collections" "Cards" .Data.Collections)}}
-{{if not (or .Data.Resume .Data.Latest)}}<p class="note">{{t "emptyLibrary"}}</p>{{end}}
+{{if not (or .Data.Resume .Data.Latest .Data.NewAlbums .Data.Books)}}<p class="note">{{t "emptyLibrary"}}</p>{{end}}
 {{end}}

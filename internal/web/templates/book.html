@@ -1,0 +1,33 @@
+{{define "title"}}{{.Data.Item.Title}}{{end}}
+{{define "content"}}
+{{$b := .Data.Book}}{{$m := .Data.Item}}
+<article class="detail music" data-queue="{{.Data.Queue}}">
+	<div class="cover">{{if .Data.Cover}}<img src="{{.Data.Cover}}" alt="">{{end}}</div>
+	<div class="info">
+		<p class="kicker">{{t "audiobook"}}{{with $b.Series}} · {{.}}{{with $b.SeriesIndex}} {{.}}{{end}}{{end}}</p>
+		<h1>{{$m.Title}}</h1>
+		{{with $b.Subtitle}}<p class="subtitle">{{.}}</p>{{end}}
+		<p class="meta">{{range $i, $a := $b.Authors}}{{if $i}}, {{end}}<a href="/web/books?author={{$a.ID}}">{{$a.Name}}</a>{{end}}
+			{{with $b.Narrators}} · {{t "readBy"}} {{range $i, $n := .}}{{if $i}}, {{end}}{{$n}}{{end}}{{end}}
+			{{if $m.Year}} · {{$m.Year}}{{end}} · {{.Data.Duration}}</p>
+		{{with $b.Genres}}<p class="genres">{{range .}}<span>{{.}}</span>{{end}}</p>{{end}}
+		{{if .Data.Progress}}<progress max="100" value="{{.Data.Progress}}"></progress>{{end}}
+		<div class="actions">
+			{{if .Data.ResumeAt}}<button class="primary" type="button" data-play="0" data-t="{{.Data.ResumeSeconds}}">▶ {{t "resume"}} {{.Data.ResumeAt}}</button>
+			<button type="button" data-play="0" data-t="0">{{t "fromStart"}}</button>
+			{{else}}<button class="primary" type="button" data-play="0" data-t="0">▶ {{t "play"}}</button>{{end}}
+			{{template "favorite" (dict "ID" $m.ID "On" .Data.Favorite "Back" (print "/web/books/" $m.ID) "Session" .Session)}}
+		</div>
+		{{with $b.Overview}}<p class="overview">{{.}}</p>{{end}}
+		{{with $b.Publisher}}<p class="note">{{.}}</p>{{end}}
+	</div>
+</article>
+{{with .Data.Chapters}}
+<section class="row"><h2>{{t "chapters"}}</h2>
+<ol class="tracks chapters">
+{{range .}}<li><button type="button" data-play="0" data-t="{{.Seconds}}"><span class="title">{{.Name}}</span><span class="time">{{.At}}</span></button></li>
+{{end}}</ol>
+</section>
+{{end}}
+{{with .Data.More}}<section class="row"><h2>{{t "moreByAuthor"}}</h2><div class="square">{{template "cards" .}}</div></section>{{end}}
+{{end}}

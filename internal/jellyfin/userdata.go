@@ -131,7 +131,33 @@ func (s *Server) markPlayed(played bool) authedHandler {
 			s.writeCollectionUserData(w, r, u, c)
 			return
 		}
+		if al, ok := s.Catalog.Snapshot().Album(id); ok {
+			for _, t := range al.Tracks {
+				if p, ok := s.resolvePlayable(t.ID, ""); ok {
+					if _, err := s.setPlayed(r.Context(), u.ID, p, played, now); err != nil {
+						s.internalError(w, r, err)
+						return
+					}
+				}
+			}
+			user, ok := s.userState(w, r, u)
+			if !ok {
+				return
+			}
+			writeJSON(w, http.StatusOK, groupUserData(al.ID, al.Tracks, user))
+			return
+		}
 		p, ok := s.resolvePlayable(id, "")
+		if !ok && s.isGroup(r, u, id) {
+			// An artist or playlist is not played itself.
+			d, err := s.Store.GetUserData(r.Context(), u.ID, id)
+			if err != nil {
+				s.internalError(w, r, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, userDataDto(id, d, 0))
+			return
+		}
 		if !ok {
 			http.NotFound(w, r)
 			return
@@ -175,11 +201,16 @@ func (s *Server) changeUserData(w http.ResponseWriter, r *http.Request, sess *Se
 	}
 	id := normalizeID(r.PathValue("itemId"))
 	p, ok := s.resolvePlayable(id, "")
-	c, isCollection := s.Catalog.Snapshot().Collection(id)
+	snap := s.Catalog.Snapshot()
+	c, isCollection := snap.Collection(id)
 	switch {
 	case isCollection:
 		// A collection keeps only its favourite flag of its own.
 		p = playable{ID: c.ID}
+	case !ok && s.isGroup(r, u, id):
+		// Albums, artists and playlists keep a favourite flag (and
+		// ratings) of their own; their play state is their tracks'.
+		p = playable{ID: id}
 	case !ok:
 		http.NotFound(w, r)
 		return
@@ -239,4 +270,18 @@ func (s *Server) updateUserItemData(w http.ResponseWriter, r *http.Request, sess
 			d.LastPlayed = req.LastPlayedDate.UTC()
 		}
 	})
+}
+
+// isGroup reports whether id is an album, an artist or a playlist of the
+// user.
+func (s *Server) isGroup(r *http.Request, u store.User, id string) bool {
+	snap := s.Catalog.Snapshot()
+	if _, ok := snap.Album(id); ok {
+		return true
+	}
+	if _, ok := snap.Artist(id); ok {
+		return true
+	}
+	p, err := s.Store.Playlist(r.Context(), id)
+	return err == nil && p.UserID == u.ID
 }

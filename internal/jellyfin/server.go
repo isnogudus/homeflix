@@ -19,6 +19,7 @@ import (
 
 	"homeflix/internal/catalog"
 	"homeflix/internal/clientaddr"
+	"homeflix/internal/hls"
 	"homeflix/internal/images"
 	"homeflix/internal/lockout"
 	"homeflix/internal/quickconnect"
@@ -57,6 +58,9 @@ type Server struct {
 	Catalog     *catalog.Catalog
 	Images      *images.Service
 	Subtitles   *subtitles.Service
+	// HLS converts music and audiobooks to AAC for players that cannot
+	// play their files; nil plays them only as they are.
+	HLS *hls.Manager
 	// QuickConnect signs apps in with a code; nil turns it off.
 	QuickConnect *quickconnect.Service
 	// Shutdown ends long-lived connections such as WebSockets, which
@@ -79,6 +83,9 @@ func (s *Server) Handler() http.Handler {
 	s.registerSessions(rt)
 	s.registerLibrary(rt)
 	s.registerItems(rt)
+	s.registerMusic(rt)
+	s.registerAudio(rt)
+	s.registerPlaylists(rt)
 	s.registerImages(rt)
 	s.registerPlayback(rt)
 	s.registerUserData(rt)

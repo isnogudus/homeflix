@@ -92,7 +92,7 @@ func (s *Store) DeleteMetadata(ctx context.Context, itemID string) error {
 // Movies returns the present top-level movies without their files.
 func (s *Store) Movies(ctx context.Context) ([]Item, error) {
 	rows, err := s.db.QueryContext(ctx, "SELECT "+itemColumns+
-		" FROM items WHERE missing_since IS NULL AND parent_id IS NULL ORDER BY sort_title")
+		" FROM items WHERE missing_since IS NULL AND parent_id IS NULL AND type = 'Movie' ORDER BY sort_title")
 	if err != nil {
 		return nil, err
 	}

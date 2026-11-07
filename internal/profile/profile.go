@@ -136,9 +136,15 @@ func (p DeviceProfile) Evaluate(info media.Info, audioIndex int, bitrate, maxBit
 		add(ContainerBitrateExceedsLimit)
 	}
 
+	// Files without video (music, audiobooks) are matched against the
+	// audio profiles, as Jellyfin does.
+	kind := "Video"
+	if !hasVideo {
+		kind = "Audio"
+	}
 	containerOK, videoOK, audioOK := false, false, false
 	for _, dp := range p.DirectPlayProfiles {
-		if !strings.EqualFold(dp.Type, "Video") {
+		if !strings.EqualFold(dp.Type, kind) {
 			continue
 		}
 		c := inList(dp.Container, info.Container)
@@ -159,7 +165,7 @@ func (p DeviceProfile) Evaluate(info media.Info, audioIndex int, bitrate, maxBit
 
 	props := properties(video, hasVideo, audio, hasAudio, numAudio)
 	for _, cp := range p.ContainerProfiles {
-		if strings.EqualFold(cp.Type, "Video") && inList(cp.Container, info.Container) {
+		if strings.EqualFold(cp.Type, kind) && inList(cp.Container, info.Container) {
 			for _, r := range failed(cp.Conditions, props) {
 				add(r)
 			}
@@ -170,7 +176,8 @@ func (p DeviceProfile) Evaluate(info media.Info, audioIndex int, bitrate, maxBit
 		switch {
 		case strings.EqualFold(cp.Type, "Video") && hasVideo:
 			codec = video.Codec
-		case strings.EqualFold(cp.Type, "VideoAudio") && hasAudio:
+		case strings.EqualFold(cp.Type, "VideoAudio") && hasAudio && hasVideo,
+			strings.EqualFold(cp.Type, "Audio") && hasAudio && !hasVideo:
 			codec = audio.Codec
 		default:
 			continue

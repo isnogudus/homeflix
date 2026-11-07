@@ -34,11 +34,12 @@ const (
 	Primary  Kind = "Primary"
 	Backdrop Kind = "Backdrop"
 	Thumb    Kind = "Thumb"
+	Logo     Kind = "Logo" // of artists
 )
 
 // ParseKind accepts Jellyfin image type names in any case.
 func ParseKind(s string) (Kind, bool) {
-	for _, k := range []Kind{Primary, Backdrop, Thumb} {
+	for _, k := range []Kind{Primary, Backdrop, Thumb, Logo} {
 		if strings.EqualFold(s, string(k)) {
 			return k, true
 		}
@@ -484,7 +485,7 @@ func scale(img image.Image, s Size) image.Image {
 // browsing does not wait for ffmpeg, and removes cached images no movie,
 // person or collection uses any more. It stops when ctx is done.
 func (s *Service) Warm(ctx context.Context, snap *catalog.Snapshot) {
-	s.warm(ctx, snap.AllMovies(), keepTags(snap.Facets("person", "", ""), snap.Collections()))
+	s.warm(ctx, snap.AllMovies(), append(keepTags(snap.Facets("person", "", ""), snap.Collections()), artTags(snap)...))
 }
 
 // keepTags lists the tags of the portraits of people and of the own
@@ -588,6 +589,16 @@ func (s *Service) removeUnused(wanted map[string]bool) {
 			tag := strings.TrimSuffix(de.Name(), ".jpg")
 			if !de.IsDir() && strings.HasSuffix(de.Name(), ".jpg") && !wanted[tag] {
 				if os.Remove(filepath.Join(s.Dir, "stills", de.Name())) == nil {
+					removed++
+				}
+			}
+		}
+	}
+	if des, err := os.ReadDir(filepath.Join(s.Dir, "covers")); err == nil {
+		for _, de := range des {
+			tag := strings.TrimSuffix(de.Name(), ".jpg")
+			if !de.IsDir() && !wanted[tag] {
+				if os.Remove(filepath.Join(s.Dir, "covers", de.Name())) == nil {
 					removed++
 				}
 			}

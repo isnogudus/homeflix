@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"homeflix/internal/catalog"
 )
 
 // assetVersions are short hashes of the static files, so that their
@@ -73,6 +75,14 @@ func funcs(lang string) template.FuncMap {
 		},
 		// dict makes a map of key and value pairs, to pass several values
 		// to a template.
+		// trackIDs joins the IDs of tracks for a form.
+		"trackIDs": func(ms []*catalog.Movie) string {
+			ids := make([]string, len(ms))
+			for i, m := range ms {
+				ids[i] = m.ID
+			}
+			return strings.Join(ids, ",")
+		},
 		"dict": func(kv ...any) map[string]any {
 			m := map[string]any{}
 			for i := 0; i+1 < len(kv); i += 2 {
@@ -107,7 +117,7 @@ func parsePages() map[string]*template.Template {
 	pages := map[string]*template.Template{}
 	for _, name := range []string{"login", "home", "error", "movies", "movie", "collections", "collection", "person",
 		"search", "play", "account", "admin", "admin_users", "admin_user", "admin_library", "admin_metadata",
-		"admin_movie", "admin_settings"} {
+		"admin_movie", "admin_settings", "music", "album", "artist", "playlist", "books", "book"} {
 		t := template.New("layout.html").Funcs(funcs("en"))
 		pages[name] = template.Must(t.ParseFS(templateFiles, "templates/layout.html", "templates/partials.html",
 			"templates/"+name+".html"))

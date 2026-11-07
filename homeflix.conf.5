@@ -228,10 +228,12 @@ The default is 4.
 How many ffmpeg processes take stills in parallel, 1 to 16.
 The default is 2.
 .It Ic transcode workers Ar number
-How many ffmpeg processes convert movies for players at once, 1 to 32.
+How many ffmpeg processes convert movies, music and audiobooks for
+players at once, 1 to 32.
 Converting means turning the audio into AAC for browsers and either
 copying the video, which takes little processor time, or transcoding it;
-a further player gets a busy answer and tries again.
+music and audiobooks are converted to AAC alone.
+A further player gets a busy answer and tries again.
 The default is 4.
 .It Ic video workers Ar number
 How many of the
@@ -317,17 +319,21 @@ Stay offline; this is the default.
 .Sh LIBRARIES
 .Bl -tag -width Ds
 .It Ic library Ar name Brq ...
-A movie library shown to clients under
+A library shown to clients under
 .Ar name .
 Names are unique regardless of case.
 The block holds one or more
 .Ic path
-statements:
+statements and at most one
+.Ic type :
 .Bl -tag -width Ds
 .It Ic path Ar path | list
 A directory of the library.
 Paths must be absolute and must not lie inside each other, also across
 libraries.
+.It Ic type Cm movies | music | audiobooks
+What the library holds; the default is
+.Cm movies .
 .El
 .El
 .Pp
@@ -362,6 +368,52 @@ or
 A movie that disappears is kept for 30 days, so that renames and remounts
 keep its watch state.
 A library directory that cannot be read leaves its movies as they are.
+.Pp
+In a
+.Cm music
+library every audio file is a track, wherever it lies.
+Albums and artists come from the tags of the tracks: the album, album
+artist, artist, track and disc number and date tags, and the MusicBrainz
+IDs where they are, so an album spread over disc folders is one album and
+an artist with albums in several directories is one artist.
+Tracks marked as part of a compilation and without album artist belong to
+.Dq Various Artists .
+Next to the tracks homeflix reads
+.Pa album.nfo
+and
+.Pa artist.nfo
+files, which take precedence over the tags,
+.Pa folder.jpg
+or
+.Pa cover.jpg
+as album covers (else the picture embedded in the tracks),
+.Pa folder.jpg ,
+.Pa backdrop.jpg
+and
+.Pa logo.png
+in an artist's folder, and an
+.Pa .lrc
+file of the same name as a track as its lyrics.
+.Pp
+In an
+.Cm audiobooks
+library a folder holding audio files is one book, its files played one
+after another as one stream; several
+.Pa .m4b
+or
+.Pa .m4a
+files in one folder are books of their own, and so are files directly in a
+library directory.
+A book is described by the
+.Pa metadata.json
+Audiobookshelf writes, then by its tags, then by its folder name; its
+chapters come from its files, else from
+.Pa metadata.json ,
+else one per file.
+.Pa cover.jpg
+is its cover.
+.Pp
+Nothing about music or books is looked up outside the house.
 .Sh FILES
 .Bl -tag -width Ds -compact
 .It Pa /usr/local/etc/homeflix.conf
@@ -380,6 +432,16 @@ ffmpeg "/usr/local/bin/ffmpeg"
 library "Filme" {
 	path "/media/movies/recent"
 	path "/media/movies/archive"
+}
+
+library "Musik" {
+	type music
+	path { "/media/music/flac", "/media/music/mp3" }
+}
+
+library "Hörbücher" {
+	type audiobooks
+	path "/media/audiobooks"
 }
 .Ed
 .Pp

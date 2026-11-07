@@ -5,6 +5,7 @@ package catalog
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"sort"
 	"strings"
@@ -14,6 +15,7 @@ import (
 
 	"golang.org/x/text/unicode/norm"
 
+	"homeflix/internal/library"
 	"homeflix/internal/media"
 	"homeflix/internal/store"
 )
@@ -58,6 +60,10 @@ type Movie struct {
 	// Set is non-nil when this is not a movie but the list entry of a
 	// collection (Type "BoxSet").
 	Set *Collection
+	// Track is set for a track of a music library (Type "Audio"), Book
+	// for an audiobook (Type "AudioBook").
+	Track *Track
+	Book  *Book
 
 	searchKey     string
 	genreIDs      map[string]bool
@@ -112,6 +118,7 @@ type Snapshot struct {
 	collections    map[string]*Collection
 	collectionList []*Collection
 	locale         media.Locale
+	music          *musicIndex
 	BuiltAt        time.Time
 }
 
@@ -161,11 +168,20 @@ func (c *Catalog) Reload(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	sidecars, err := c.Store.Sidecars(ctx, "")
+	if err != nil {
+		return err
+	}
 	snap := Build(libs, items, Options{Locale: c.Locale, Articles: c.Articles, Metadata: meta, People: people,
-		Collections: cols, MetadataDir: c.MetadataDir, Log: c.Log})
+		Collections: cols, Sidecars: sidecars, MetadataDir: c.MetadataDir, Log: c.Log})
 	c.Set(snap)
 	if c.Log != nil {
-		c.Log.Info("catalog loaded", "movies", len(snap.movies), "took", time.Since(start).Round(time.Millisecond))
+		attrs := []any{"movies", len(snap.movies)}
+		if snap.HasAudio() {
+			attrs = append(attrs, "tracks", len(snap.music.tracks), "albums", len(snap.music.albums),
+				"artists", len(snap.music.artists), "books", len(snap.music.books))
+		}
+		c.Log.Info("catalog loaded", append(attrs, "took", time.Since(start).Round(time.Millisecond))...)
 	}
 	return nil
 }
@@ -183,6 +199,7 @@ type Options struct {
 	Metadata    map[string]store.Metadata // by item ID
 	People      map[int]store.Person      // by TMDB ID
 	Collections map[int]store.Collection  // by TMDB ID
+	Sidecars    []store.Sidecar           // of music and audiobook libraries
 	MetadataDir string
 	Log         *slog.Logger
 }
@@ -200,11 +217,26 @@ func Build(libs []store.Library, items []store.Item, opt Options) *Snapshot {
 		studios:  map[string]*Facet{},
 	}
 	counts := map[string]int{}
-	var extras []*Movie
+	var extras, tracks, books []*Movie
 	for _, it := range items {
 		m := &Movie{Item: it}
 		m.Files = nil
+		if it.Type == TypeAudio {
+			if t := buildTrack(m, it, opt); t != nil {
+				tracks = append(tracks, m)
+				s.byID[m.ID] = m
+			}
+			continue
+		}
 		m.Versions = buildVersions(it, opt.Locale, opt.Log)
+		if it.Type == TypeAudioBook {
+			if len(m.Versions) > 0 {
+				books = append(books, m)
+				s.byID[m.ID] = m
+				counts[it.LibraryID]++
+			}
+			continue
+		}
 		if md, ok := opt.Metadata[it.ID]; ok && it.ParentID == "" {
 			m.applyMeta(md, opt)
 		}
@@ -241,6 +273,12 @@ func Build(libs []store.Library, items []store.Item, opt Options) *Snapshot {
 	}
 	sort.Slice(s.movies, func(i, j int) bool { return lessByName(s.movies[i], s.movies[j]) })
 	s.locale = opt.Locale
+	if len(tracks)+len(books) > 0 {
+		s.music = buildMusic(tracks, books, opt)
+		for _, al := range s.music.albums {
+			counts[al.LibraryID]++
+		}
+	}
 	s.buildCollections(opt)
 	for _, f := range s.people {
 		if p, ok := opt.People[f.TMDbID]; ok {
@@ -251,6 +289,33 @@ func Build(libs []store.Library, items []store.Item, opt Options) *Snapshot {
 		s.Libraries = append(s.Libraries, Library{Library: l, Movies: counts[l.ID]})
 	}
 	return s
+}
+
+// buildTrack makes the version and track information of a music file
+// from its kept audio metadata; files not probed yet are left out.
+func buildTrack(m *Movie, it store.Item, opt Options) *Track {
+	if len(it.Files) == 0 || it.Files[0].AudioMeta == "" {
+		return nil
+	}
+	f := it.Files[0]
+	var meta media.AudioMeta
+	if err := json.Unmarshal([]byte(f.AudioMeta), &meta); err != nil {
+		if opt.Log != nil {
+			opt.Log.Warn("unreadable audio metadata", "path", f.Path, "err", err)
+		}
+		return nil
+	}
+	info := meta.Info(f.Duration, opt.Locale)
+	f.AudioMeta = ""
+	m.Versions = []*Version{{ID: it.ID, Parts: []Part{{File: f, Info: info}}, Size: f.Size, Duration: info.Duration}}
+	t := &Track{Meta: meta, Disc: max(meta.Disc, 1), Number: meta.Track}
+	m.Track = t
+	if meta.Title != "" {
+		m.Title = meta.Title
+		m.SortTitle = library.SortKey(meta.Title, opt.Articles)
+	}
+	m.Year = meta.Year()
+	return t
 }
 
 func lessByName(a, b *Movie) bool {

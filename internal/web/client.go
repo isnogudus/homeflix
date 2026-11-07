@@ -39,6 +39,7 @@ func (s *Server) registerClient(mux *http.ServeMux) {
 	mux.HandleFunc("GET /web/account", s.signedIn(s.account))
 	mux.HandleFunc("POST /web/account/password", s.signedIn(s.changeOwnPassword))
 	mux.HandleFunc("POST /web/account/sessions/{session}/end", s.signedIn(s.endOwnSession))
+	s.musicRoutes(mux)
 }
 
 // snapshot returns the current catalog, or an empty one.
@@ -61,7 +62,8 @@ func (s *Server) userState(w http.ResponseWriter, r *http.Request, sess *session
 
 // clientData starts the data of a web client page.
 func (s *Server) clientData(r *http.Request, sess *session, nav string) map[string]any {
-	return map[string]any{"Nav": nav, "AdminLink": sess.User.IsAdmin && s.adminAllowed(r), "Query": r.URL.Query().Get("q")}
+	return map[string]any{"Nav": nav, "AdminLink": sess.User.IsAdmin && s.adminAllowed(r), "Query": r.URL.Query().Get("q"),
+		"AudioPlayer": true, "HasMusic": s.hasLibrary("music"), "HasBooks": s.hasLibrary("books")}
 }
 
 // card is a poster of a grid or a row.
@@ -160,8 +162,16 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request, sess *session) {
 	}
 	snap := s.snapshot()
 	var resume []card
-	for _, rr := range snap.Resume(user, "", 12) {
-		resume = append(resume, resumeCard(rr))
+	var books []card
+	for _, rr := range snap.Resume(user, "", 0) {
+		switch {
+		case rr.Movie.Book != nil:
+			if len(books) < 12 {
+				books = append(books, bookCard(rr.Movie, user))
+			}
+		case rr.Movie.Track == nil && len(resume) < 12:
+			resume = append(resume, resumeCard(rr))
+		}
 	}
 	var cols []card
 	for i, c := range snap.Collections() {
@@ -173,6 +183,15 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request, sess *session) {
 	favs, _ := snap.Movies(catalog.Query{Favorite: ptr(true), User: user, SortBy: []string{"SortName"}, Limit: 18})
 	d := s.clientData(r, sess, "home")
 	d["Resume"], d["Latest"], d["Collections"], d["Favorites"] = resume, movieCards(snap.Latest("", 18), user), cols, movieCards(favs, user)
+	d["Books"] = books
+	if albums, _ := snap.AudioItems(catalog.AudioQuery{Types: map[string]bool{catalog.TypeAlbum: true},
+		SortBy: []string{"DateCreated"}, Descending: []bool{true}, Limit: 18}); len(albums) > 0 {
+		var cards []card
+		for _, it := range albums {
+			cards = append(cards, albumCard(it.Album, user))
+		}
+		d["NewAlbums"] = cards
+	}
 	s.render(w, r, http.StatusOK, "home", sess, d)
 }
 
@@ -333,6 +352,17 @@ func (s *Server) movie(w http.ResponseWriter, r *http.Request, sess *session) {
 	snap := s.snapshot()
 	m, ok := snap.Item(r.PathValue("id"))
 	if !ok || len(m.Versions) == 0 {
+		http.NotFound(w, r)
+		return
+	}
+	switch {
+	case m.Book != nil:
+		http.Redirect(w, r, "/web/books/"+m.ID, http.StatusSeeOther)
+		return
+	case m.Track != nil && m.Track.Album != nil:
+		http.Redirect(w, r, "/web/music/albums/"+m.Track.Album.ID, http.StatusSeeOther)
+		return
+	case m.Track != nil:
 		http.NotFound(w, r)
 		return
 	}
@@ -583,6 +613,29 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request, sess *session) {
 		}
 		cols, _ := snap.Movies(catalog.Query{Kinds: catalog.CollectionsOnly, Search: q, User: user, Limit: maxSearchResults})
 		d["Movies"], d["MovieTotal"], d["People"], d["Collections"] = movieCards(ms, user), total, people, movieCards(cols, user)
+		find := func(typ string) []catalog.AudioItem {
+			items, _ := snap.AudioItems(catalog.AudioQuery{Types: map[string]bool{typ: true}, Search: q, User: user,
+				SortBy: []string{"SortName"}, Limit: maxSearchResults})
+			return items
+		}
+		var albums, artists, books []card
+		for _, it := range find(catalog.TypeAlbum) {
+			albums = append(albums, albumCard(it.Album, user))
+		}
+		for _, it := range find(catalog.TypeArtist) {
+			artists = append(artists, artistCard(it.Artist))
+		}
+		for _, it := range find(catalog.TypeAudioBook) {
+			books = append(books, bookCard(it.Item, user))
+		}
+		var tracks []*catalog.Movie
+		for _, it := range find(catalog.TypeAudio) {
+			tracks = append(tracks, it.Item)
+		}
+		d["Albums"], d["Artists"], d["AudioBooks"] = albums, artists, books
+		if len(tracks) > 0 {
+			d["Tracks"], d["Queue"] = trackRows(tracks, user, true), s.queueJSON(tracks, sess)
+		}
 		d["Searched"] = true
 	}
 	s.render(w, r, http.StatusOK, "search", sess, d)

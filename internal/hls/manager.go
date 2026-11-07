@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -34,6 +36,12 @@ type Source struct {
 	Duration time.Duration
 	Audio    int    // stream index of the audio track
 	Video    *Video // how the video is transcoded; nil copies it
+	// AudioOnly converts the audio track alone, for music and
+	// audiobooks; Video is then ignored.
+	AudioOnly bool
+	// Concat, if set, are files played one after another as one stream
+	// (an audiobook of several files); Path is then unused for input.
+	Concat []string
 	// Owner is the player asking, such as a web session. A player plays
 	// one thing at a time, so its new session ends its others; players
 	// do not share sessions.
@@ -41,7 +49,12 @@ type Source struct {
 }
 
 func (s Source) session() string {
-	k := s.Key + "-a" + strconv.Itoa(s.Audio) + s.Video.key()
+	k := s.Key + "-a" + strconv.Itoa(s.Audio)
+	if s.AudioOnly {
+		k += "-audio"
+	} else {
+		k += s.Video.key()
+	}
 	if s.Owner != "" {
 		k += "-o" + s.Owner
 	}
@@ -49,6 +62,9 @@ func (s Source) session() string {
 }
 
 func (s Source) verb() string {
+	if s.AudioOnly {
+		return "audio"
+	}
 	if s.Video != nil {
 		return "transcode"
 	}
@@ -145,7 +161,7 @@ func (m *Manager) Segments(ctx context.Context, src Source) ([]Segment, error) {
 }
 
 func (m *Manager) planOf(ctx context.Context, src Source) (plan, error) {
-	if src.Video != nil {
+	if src.Video != nil || src.AudioOnly {
 		return plan{segments: FixedSegments(src.Duration)}, nil
 	}
 	m.mu.Lock()
@@ -213,7 +229,7 @@ func (m *Manager) step(src Source, p plan, n int) (string, bool, error) {
 				}
 			}
 		}
-		s = &session{src: src, plan: p, dir: filepath.Join(m.Dir, key), made: map[int]bool{}}
+		s = &session{src: src, plan: p, dir: filepath.Join(m.Dir, dirName(key)), made: map[int]bool{}}
 		m.sessions[key] = s
 	}
 	s.lastReq, s.seen = n, time.Now()
@@ -314,6 +330,11 @@ func (m *Manager) start(s *session, first int) (*run, error) {
 	if err := os.Remove(list); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
+	if len(s.src.Concat) > 0 {
+		if err := writeConcatList(filepath.Join(s.dir, "concat.txt"), s.src.Concat); err != nil {
+			return nil, err
+		}
+	}
 	cmd := exec.Command(m.FFmpeg, s.args(first, list)...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -359,7 +380,7 @@ func (s *session) args(first int, list string) []string {
 	segs := s.plan.segments
 	start := segs[first].Start
 	seek := start
-	if s.src.Video == nil && first > 0 {
+	if s.src.Video == nil && !s.src.AudioOnly && first > 0 {
 		// Seek a little past the keyframe the segment starts at: an input
 		// seek lands on the keyframe at or before its target, and the
 		// keyframe's own timestamp may lie a frame after the time in the
@@ -377,8 +398,31 @@ func (s *session) args(first int, list string) []string {
 	for _, seg := range segs[first+1:] {
 		times = append(times, seconds(seg.Start-start))
 	}
-	args := []string{"-hide_banner", "-loglevel", "error", "-nostdin", "-y",
-		"-ss", seconds(seek), "-copyts", "-i", "file:" + s.src.Path}
+	args := []string{"-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-ss", seconds(seek), "-copyts"}
+	if len(s.src.Concat) > 0 {
+		args = append(args, "-f", "concat", "-safe", "0", "-i", "file:"+filepath.Join(s.dir, "concat.txt"))
+	} else {
+		args = append(args, "-i", "file:"+s.src.Path)
+	}
+	if s.src.AudioOnly {
+		// Music and audiobooks: the audio alone, stereo AAC at a rate
+		// that keeps music transparent.
+		audio := "0:" + strconv.Itoa(s.src.Audio)
+		if len(s.src.Concat) > 0 {
+			audio = "0:a:0"
+		}
+		args = append(args, "-map", audio, "-vn", "-sn", "-dn",
+			"-c:a", "aac", "-ac", "2", "-b:a", "256k",
+			"-output_ts_offset", seconds(tsOffset),
+			"-f", "segment", "-segment_format", "mpegts", "-segment_format_options", "mpegts_copyts=1",
+			"-segment_start_number", strconv.Itoa(first),
+			"-segment_list", list, "-segment_list_type", "csv",
+			"-muxdelay", "0", "-muxpreload", "0")
+		if len(times) > 0 {
+			args = append(args, "-segment_times", strings.Join(times, ","))
+		}
+		return append(args, filepath.Join(s.dir, "%d.ts"))
+	}
 	if v := s.src.Video; v != nil {
 		args = append(args, "-filter_complex", v.filter(), "-map", "[v]", "-map", "0:"+strconv.Itoa(s.src.Audio))
 		args = append(args, x264Args...)
@@ -534,4 +578,21 @@ func (m *Manager) Sessions() (all, video int) {
 		}
 	}
 	return all, video
+}
+
+// writeConcatList writes the input list of ffmpeg's concat demuxer.
+func writeConcatList(path string, files []string) error {
+	var b strings.Builder
+	b.WriteString("ffconcat version 1.0\n")
+	for _, f := range files {
+		b.WriteString("file '" + strings.ReplaceAll(f, "'", `'\''`) + "'\n")
+	}
+	return os.WriteFile(path, []byte(b.String()), 0o640)
+}
+
+// dirName is the working directory of a session: a hash of its key, which
+// holds what clients send (device IDs) and must not become a path.
+func dirName(key string) string {
+	sum := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(sum[:16])
 }

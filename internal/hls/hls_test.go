@@ -321,3 +321,11 @@ func TestTranscode(t *testing.T) {
 	}
 	m.mu.Unlock()
 }
+
+func TestSessionDirStaysInside(t *testing.T) {
+	src := Source{Key: "k", Owner: "x/../../../../etc", AudioOnly: true}
+	d := dirName(src.session())
+	if strings.ContainsAny(d, "/.\\") || len(d) != 32 {
+		t.Errorf("session directory %q", d)
+	}
+}

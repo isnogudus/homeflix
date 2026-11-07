@@ -94,3 +94,78 @@
 </table>
 {{else}}<p>{{t "noPasskeys"}}</p>{{end}}
 {{end}}
+
+{{define "tracklist"}}
+<ol class="tracks">
+{{$discs := .Discs}}{{$pl := .Playlist}}{{$sess := .Session}}{{$last := 0}}
+{{range .Rows}}
+	{{if and $discs (ne .Disc $last)}}<li class="disc">{{t "disc"}} {{.Disc}}</li>{{end}}{{$last = .Disc}}
+	<li{{if .Played}} class="played"{{end}}>
+		<button type="button" class="track" data-play="{{.Index}}">
+			<span class="num">{{if .Number}}{{.Number}}{{end}}</span>
+			<span class="title">{{.Title}}{{with .Artist}}<span class="sub">{{.}}</span>{{end}}</span>
+			<span class="time">{{.Duration}}</span>
+		</button>
+		<button type="button" class="small" data-next="{{.Index}}" title="{{t "playNext"}}" aria-label="{{t "playNext"}}">⤴</button>
+		{{if $pl}}<form method="post" action="/web/music/playlists/{{$pl}}/remove"><input type="hidden" name="csrf" value="{{$sess.CSRF}}"><input type="hidden" name="entry" value="{{.Entry}}"><button class="small" title="{{t "remove"}}" aria-label="{{t "remove"}}">×</button></form>{{end}}
+	</li>
+{{end}}
+</ol>
+{{end}}
+
+{{define "favorite"}}
+<form method="post" action="/web/favorite/{{.ID}}"><input type="hidden" name="csrf" value="{{.Session.CSRF}}"><input type="hidden" name="back" value="{{.Back}}">
+	{{if .On}}<button aria-pressed="true">★ {{t "favorite"}}</button>{{else}}<input type="hidden" name="favorite" value="on"><button aria-pressed="false">☆ {{t "favorite"}}</button>{{end}}
+</form>
+{{end}}
+
+{{define "toplaylist"}}
+<details class="toplaylist"><summary>{{t "addToPlaylist"}}</summary>
+	{{$s := .Session}}{{$ids := .IDs}}
+	{{range .Playlists}}<form class="inline" method="post" action="/web/music/playlists/{{.URL}}/add"><input type="hidden" name="csrf" value="{{$s.CSRF}}"><input type="hidden" name="ids" value="{{$ids}}"><button>{{.Label}}</button></form>{{end}}
+	<form class="inline" method="post" action="/web/music/playlists"><input type="hidden" name="csrf" value="{{$s.CSRF}}"><input type="hidden" name="ids" value="{{$ids}}">
+		<input name="name" required placeholder="{{t "playlistName"}}" aria-label="{{t "playlistName"}}"><button>{{t "newPlaylist"}}</button></form>
+</details>
+{{end}}
+
+{{define "letters"}}
+<nav class="letters" aria-label="{{t "byLetter"}}">
+	<a href="{{.All.URL}}"{{if .All.Current}} aria-current="page"{{end}}>{{t "all"}}</a>
+	{{range .Letters}}<a href="{{.URL}}"{{if .Current}} aria-current="page"{{end}}>{{.Label}}</a>{{end}}
+</nav>
+{{end}}
+
+{{define "pager"}}
+{{if or .Prev .Next}}
+<nav class="pager">
+	{{with .Prev}}<a href="{{.}}" rel="prev">← {{t "previous"}}</a>{{end}}
+	<span>{{.Page}} / {{.Pages}}</span>
+	{{with .Next}}<a href="{{.}}" rel="next">{{t "next"}} →</a>{{end}}
+</nav>
+{{end}}
+{{end}}
+
+{{define "audioplayer"}}
+<div id="audioplayer" class="audiobar" hidden data-hls="{{asset "hls-1.7.3.light.min.js"}}" data-csrf="{{.Session.CSRF}}">
+	<audio preload="metadata"></audio>
+	<a class="art"><img alt=""></a>
+	<div class="what"><a class="title"></a><span class="artist"></span></div>
+	<div class="controls">
+		<button type="button" data-act="prev" aria-label="{{t "previousTrack"}}">⏮</button>
+		<button type="button" data-act="back" aria-label="{{t "back30"}}" class="bookonly">−30</button>
+		<button type="button" data-act="toggle" class="playpause" aria-label="{{t "playPause"}}">▶</button>
+		<button type="button" data-act="fwd" aria-label="{{t "forward30"}}" class="bookonly">+30</button>
+		<button type="button" data-act="next" aria-label="{{t "nextTrack"}}">⏭</button>
+	</div>
+	<div class="seek"><span class="pos">0:00</span><input type="range" min="0" max="1000" value="0" aria-label="{{t "position"}}"><span class="len">0:00</span></div>
+	<div class="extras">
+		<select class="chapter bookonly" aria-label="{{t "chapters"}}"></select>
+		<select class="speed bookonly" aria-label="{{t "speed"}}"><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="1.75">1.75×</option><option value="2">2×</option></select>
+		<select class="sleep" aria-label="{{t "sleepTimer"}}"><option value="">{{t "sleepOff"}}</option><option value="15">15 min</option><option value="30">30 min</option><option value="45">45 min</option><option value="60">60 min</option></select>
+		<button type="button" data-act="queue" aria-label="{{t "queue"}}">☰</button>
+		<button type="button" data-act="close" aria-label="{{t "closePlayer"}}">×</button>
+	</div>
+	<ol class="queue" hidden></ol>
+	<p class="flash err" hidden>{{t "playError"}}</p>
+</div>
+{{end}}

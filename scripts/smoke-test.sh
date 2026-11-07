@@ -2,6 +2,8 @@
 # Runs a throwaway homeflix instance on 127.0.0.1 with its own data
 # directory, a generated test user and a generated two-second movie, walks
 # through the client flow with curl, and removes everything afterwards.
+# A generated album (an MP3 and a WMA track) and audiobook (an M4B with
+# chapters) check music, conversion to AAC and audiobooks.
 # Needs ffmpeg and ffprobe in PATH.
 #
 # Usage: scripts/smoke-test.sh <path-to-homeflix-binary> [port]
@@ -34,6 +36,18 @@ mkdir "$work/media"
 printf '1\n00:00:00,500 --> 00:00:01,500\nsmoke subtitle\n' >"$work/sub.srt"
 ffmpeg -loglevel error -f lavfi -i testsrc=duration=2:size=320x240:rate=10 -i "$work/sub.srt" \
 	-map 0 -map 1 -c:v mpeg4 -c:s srt "$work/media/Smoke Test (2026).mkv" || fail "cannot make the test movie"
+mkdir -p "$work/music/Smoke Band/Smoke Album" "$work/books/Smoke Author/Smoke Book"
+for n in 1 2; do
+	ext=mp3
+	[ $n = 2 ] && ext=wma
+	ffmpeg -loglevel error -f lavfi -i "sine=frequency=44$n:duration=8" -metadata title="Smoke Song $n" \
+		-metadata artist="Smoke Band" -metadata album_artist="Smoke Band" -metadata album="Smoke Album" \
+		-metadata track="$n" -metadata date=2026 -metadata genre=Smoke \
+		"$work/music/Smoke Band/Smoke Album/0$n Smoke Song $n.$ext" || fail "cannot make test track $n"
+done
+printf ';FFMETADATA1\ntitle=Smoke Book\nartist=Smoke Author\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=0\nEND=5000\ntitle=One\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=5000\nEND=10000\ntitle=Two\n' >"$work/chapters.txt"
+ffmpeg -loglevel error -f lavfi -i "sine=frequency=330:duration=10" -i "$work/chapters.txt" -map 0 -map_metadata 1 \
+	-c:a aac "$work/books/Smoke Author/Smoke Book/Smoke Book.m4b" || fail "cannot make the test book"
 
 cat >"$work/homeflix.conf" <<EOF
 server name "smoke"
@@ -42,6 +56,14 @@ data directory "data"
 log level debug
 no scan interval
 library "Smoke" { path "$work/media" }
+library "Smoke Music" {
+	type music
+	path "$work/music"
+}
+library "Smoke Books" {
+	type audiobooks
+	path "$work/books"
+}
 EOF
 
 password=$(openssl rand -hex 16)
@@ -97,6 +119,33 @@ grep -q "smoke subtitle" "$work/body" || fail "extracted subtitles lack the text
 expect 200 GET "/Videos/$item/$item/Subtitles/1/Stream.vtt"
 grep -q "^WEBVTT" "$work/body" || fail "WebVTT output lacks its header: $(cat "$work/body")"
 expect 404 GET "/Videos/$item/$item/Subtitles/0/Stream.srt"
+
+# Music: an album of two tracks; the WMA track plays converted to AAC.
+expect 200 GET /UserViews
+grep -q '"CollectionType":"music"' "$work/body" || fail "no music library: $(cat "$work/body")"
+grep -q '"CollectionType":"books"' "$work/body" || fail "no audiobook library: $(cat "$work/body")"
+# ids prints the IDs of the items of a listing in order.
+ids() { grep -o '"ServerId":"[0-9a-f]\{32\}","Id":"[0-9a-f]\{32\}"' "$work/body" | cut -d'"' -f8; }
+expect 200 GET '/Items?Recursive=true&IncludeItemTypes=MusicAlbum'
+album=$(ids | head -1)
+grep -q '"Name":"Smoke Album"' "$work/body" || fail "test album missing: $(cat "$work/body")"
+expect 200 GET "/Items?ParentId=$album&IncludeItemTypes=Audio&SortBy=ParentIndexNumber,IndexNumber"
+grep -q '"TotalRecordCount":2' "$work/body" || fail "album tracks: $(cat "$work/body")"
+mp3=$(ids | sed -n 1p)
+wma=$(ids | sed -n 2p)
+expect 200 GET "/Audio/$mp3/stream?Static=true"
+profile='{"DeviceProfile":{"DirectPlayProfiles":[{"Type":"Audio","Container":"mp3,wma","AudioCodec":"mp3"}],"TranscodingProfiles":[{"Type":"Audio","Container":"ts","Protocol":"hls","AudioCodec":"aac"}]}}'
+expect 200 POST "/Items/$wma/PlaybackInfo" "$profile"
+url=$(sed -E 's/.*"TranscodingUrl":"([^"]+)".*/\1/; s/\\u0026/\&/g' "$work/body")
+case $url in /Audio/*main.m3u8*) ;; *) fail "no conversion offered for WMA: $(cat "$work/body")" ;; esac
+expect 200 GET "$url"
+seg=$(grep '^hls/0.ts' "$work/body")
+expect 200 GET "/Audio/$wma/$seg"
+[ "$(head -c 1 "$work/body" | od -An -tx1 | tr -d ' ')" = 47 ] || fail "segment is not MPEG-TS"
+expect 404 GET "/Audio/$wma/Lyrics"
+# Audiobooks: one book with its chapters.
+expect 200 GET '/Items?Recursive=true&IncludeItemTypes=AudioBook&Fields=Chapters'
+grep -q '"Name":"Two"' "$work/body" || fail "book chapters missing: $(cat "$work/body")"
 
 # The WebSocket handshake; curl then waits for data until it times out.
 got=$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 -H 'Connection: Upgrade' -H 'Upgrade: websocket' \

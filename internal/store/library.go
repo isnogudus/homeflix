@@ -48,14 +48,26 @@ type MediaFile struct {
 	Duration   time.Duration
 	Container  string
 	BitRate    int64
+	// AudioMeta is the JSON of media.AudioMeta for audio files, "" for
+	// others and until probed. Files of tracks are loaded with it in place
+	// of the probe data.
+	AudioMeta string
 }
 
-// EnsureLibrary returns the library with this name, creating it if needed.
+// EnsureLibrary returns the library with this name, creating it if needed;
+// a changed collection type is stored.
 func (s *Store) EnsureLibrary(ctx context.Context, name, collectionType string) (Library, error) {
 	var lib Library
 	err := s.db.QueryRowContext(ctx, "SELECT id, name, collection_type FROM libraries WHERE name = ?", name).
 		Scan(&lib.ID, &lib.Name, &lib.CollectionType)
 	if err == nil {
+		if lib.CollectionType != collectionType {
+			if _, err := s.db.ExecContext(ctx, "UPDATE libraries SET collection_type = ? WHERE id = ?",
+				collectionType, lib.ID); err != nil {
+				return Library{}, err
+			}
+			lib.CollectionType = collectionType
+		}
 		return lib, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
@@ -107,18 +119,18 @@ func scanItem(row interface{ Scan(...any) error }) (Item, error) {
 	return it, nil
 }
 
-const fileColumns = "id, item_id, version, part, path, size, mtime, probe, probe_error, probed_at, duration_ms, container, bit_rate"
+const fileColumns = "id, item_id, version, part, path, size, mtime, probe, probe_error, probed_at, duration_ms, container, bit_rate, audio_meta"
 
 func scanFile(row interface{ Scan(...any) error }) (MediaFile, error) {
 	var f MediaFile
-	var probe, probeErr sql.NullString
+	var probe, probeErr, audio sql.NullString
 	var mtime, probedAt, duration, bitRate sql.NullInt64
 	err := row.Scan(&f.ID, &f.ItemID, &f.Version, &f.Part, &f.Path, &f.Size, &mtime, &probe, &probeErr,
-		&probedAt, &duration, &f.Container, &bitRate)
+		&probedAt, &duration, &f.Container, &bitRate, &audio)
 	if err != nil {
 		return MediaFile{}, err
 	}
-	f.Probe, f.ProbeError = probe.String, probeErr.String
+	f.Probe, f.ProbeError, f.AudioMeta = probe.String, probeErr.String, audio.String
 	f.ModTime, f.ProbedAt = fromMillis(mtime), fromMillis(probedAt)
 	f.Duration = time.Duration(duration.Int64) * time.Millisecond
 	f.BitRate = bitRate.Int64
@@ -148,7 +160,7 @@ func (s *Store) LibraryItems(ctx context.Context, libraryID string) ([]Item, err
 		return nil, err
 	}
 	frows, err := s.db.QueryContext(ctx, `SELECT f.id, f.item_id, f.version, f.part, f.path, f.size, f.mtime,
-		NULL, f.probe_error, f.probed_at, f.duration_ms, f.container, f.bit_rate
+		NULL, f.probe_error, f.probed_at, f.duration_ms, f.container, f.bit_rate, NULL
 		FROM media_files f JOIN items i ON i.id = f.item_id WHERE i.library_id = ?
 		ORDER BY f.version, f.part`, libraryID)
 	if err != nil {
@@ -168,7 +180,8 @@ func (s *Store) LibraryItems(ctx context.Context, libraryID string) ([]Item, err
 }
 
 // PresentItems returns all items that are not missing, of every library,
-// with their files including probe data.
+// with their files including probe data; files of tracks (items of type
+// Audio) come with their audio metadata instead.
 func (s *Store) PresentItems(ctx context.Context) ([]Item, error) {
 	rows, err := s.db.QueryContext(ctx, "SELECT "+itemColumns+" FROM items WHERE missing_since IS NULL")
 	if err != nil {
@@ -190,7 +203,8 @@ func (s *Store) PresentItems(ctx context.Context) ([]Item, error) {
 		return nil, err
 	}
 	frows, err := s.db.QueryContext(ctx, `SELECT f.id, f.item_id, f.version, f.part, f.path, f.size, f.mtime,
-		f.probe, f.probe_error, f.probed_at, f.duration_ms, f.container, f.bit_rate
+		CASE WHEN i.type = 'Audio' THEN NULL ELSE f.probe END, f.probe_error, f.probed_at, f.duration_ms,
+		f.container, f.bit_rate, f.audio_meta
 		FROM media_files f JOIN items i ON i.id = f.item_id WHERE i.missing_since IS NULL
 		ORDER BY f.version, f.part`)
 	if err != nil {
@@ -313,7 +327,7 @@ func (s *Store) ApplyScan(ctx context.Context, ch ScanChanges) error {
 		f := u.File
 		q := "UPDATE media_files SET item_id = ?, version = ?, part = ?, path = ?, size = ?, mtime = ?"
 		if u.ResetProbe {
-			q += ", probe = NULL, probe_error = NULL, probed_at = NULL, duration_ms = NULL, container = '', bit_rate = NULL"
+			q += ", probe = NULL, probe_error = NULL, probed_at = NULL, duration_ms = NULL, container = '', bit_rate = NULL, audio_meta = NULL"
 		}
 		if err := exec(q+" WHERE id = ?", f.ItemID, f.Version, f.Part, f.Path, f.Size, f.ModTime.UnixMilli(), f.ID); err != nil {
 			return fmt.Errorf("update file %s: %w", f.Path, err)
@@ -326,7 +340,7 @@ func (s *Store) ApplyScan(ctx context.Context, ch ScanChanges) error {
 // nor a probe error.
 func (s *Store) UnprobedFiles(ctx context.Context) ([]MediaFile, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT f.id, f.item_id, f.version, f.part, f.path, f.size, f.mtime,
-		NULL, NULL, NULL, NULL, f.container, NULL
+		NULL, NULL, NULL, NULL, f.container, NULL, NULL
 		FROM media_files f JOIN items i ON i.id = f.item_id
 		WHERE f.probe IS NULL AND f.probe_error IS NULL AND i.missing_since IS NULL
 		ORDER BY f.path`)
@@ -352,15 +366,17 @@ type ProbeResult struct {
 	Container string
 	BitRate   int64
 	Err       string // set instead of JSON when probing failed
+	// AudioMeta is the JSON of media.AudioMeta for audio files.
+	AudioMeta string
 }
 
 // SetProbeResult stores a probe result, unless the file changed since it
 // was read for probing.
 func (s *Store) SetProbeResult(ctx context.Context, f MediaFile, r ProbeResult, at time.Time) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE media_files SET probe = ?, probe_error = ?, probed_at = ?,
-		duration_ms = ?, container = ?, bit_rate = ? WHERE id = ? AND size = ? AND mtime = ?`,
+		duration_ms = ?, container = ?, bit_rate = ?, audio_meta = ? WHERE id = ? AND size = ? AND mtime = ?`,
 		nullString(r.JSON), nullString(r.Err), at.UnixMilli(), nullInt(int(r.Duration.Milliseconds())),
-		r.Container, nullInt(int(r.BitRate)), f.ID, f.Size, f.ModTime.UnixMilli())
+		r.Container, nullInt(int(r.BitRate)), nullString(r.AudioMeta), f.ID, f.Size, f.ModTime.UnixMilli())
 	return err
 }
 
@@ -368,7 +384,7 @@ func (s *Store) SetProbeResult(ctx context.Context, f MediaFile, r ProbeResult, 
 // probed again.
 func (s *Store) ResetProbes(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE media_files SET probe = NULL, probe_error = NULL, probed_at = NULL,
-		duration_ms = NULL, container = '', bit_rate = NULL`)
+		duration_ms = NULL, container = '', bit_rate = NULL, audio_meta = NULL`)
 	return err
 }
 
@@ -417,4 +433,14 @@ func (s *Store) AllFiles(ctx context.Context, fn func(ProbedFile) error) error {
 		}
 	}
 	return rows.Err()
+}
+
+// FileProbe returns the stored probe data of one file, "" if there is none.
+func (s *Store) FileProbe(ctx context.Context, fileID string) (string, error) {
+	var probe sql.NullString
+	err := s.db.QueryRowContext(ctx, "SELECT probe FROM media_files WHERE id = ?", fileID).Scan(&probe)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return probe.String, err
 }

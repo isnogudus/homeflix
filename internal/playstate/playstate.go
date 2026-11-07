@@ -18,6 +18,10 @@ const (
 	MinResumeFraction = 0.05
 	MaxResumeFraction = 0.90
 	MinResumeRuntime  = 5 * time.Minute
+	// Audiobooks: no position in the first five minutes, and played
+	// within the last five (MinAudiobookResume, MaxAudiobookResume).
+	MinAudiobookResume = 5 * time.Minute
+	MaxAudiobookResume = 5 * time.Minute
 )
 
 // Item is something user data is kept for: a movie, an extra or a later
@@ -35,6 +39,10 @@ func Runtime(m *catalog.Movie) time.Duration {
 	if len(m.Versions) == 0 {
 		return 0
 	}
+	// An audiobook plays as one stream over all its files.
+	if m.Book != nil {
+		return m.Book.Duration
+	}
 	return m.Versions[0].Parts[0].Info.Duration
 }
 
@@ -43,7 +51,8 @@ func Runtime(m *catalog.Movie) time.Duration {
 func Resolve(snap *catalog.Snapshot, itemID, sourceID string) (Item, bool) {
 	if m, ok := snap.Item(itemID); ok {
 		it := Item{ID: m.ID, Movie: m, Runtime: Runtime(m)}
-		if _, v, ok := snap.Source(sourceID); ok && len(v.Parts) > 0 {
+		// A book plays as one stream; its source is the whole book.
+		if _, v, ok := snap.Source(sourceID); ok && len(v.Parts) > 0 && m.Book == nil {
 			it.Runtime = v.Parts[0].Info.Duration
 		}
 		return it, true
@@ -65,7 +74,10 @@ const (
 
 // Report records a playback report at pos (nil if the client sent none).
 // A stop past MaxResumeFraction marks the item played, and the movie too
-// when it was the last part. It returns the item's new state.
+// when it was the last part. Tracks shorter than MinResumeRuntime count as
+// played once MinResumeFraction of them is reached; audiobooks follow the
+// audiobook rules, also on progress reports. It returns the item's new
+// state.
 func Report(ctx context.Context, st *store.Store, userID string, it Item, kind Kind, pos *time.Duration, failed bool) (store.UserData, error) {
 	d, err := st.GetUserData(ctx, userID, it.ID)
 	if err != nil {
@@ -74,12 +86,34 @@ func Report(ctx context.Context, st *store.Store, userID string, it Item, kind K
 	now := time.Now().UTC()
 	d.LastPlayed = now
 	finished := false
-	if pos != nil && kind != Start {
+	isBook := it.Movie != nil && it.Movie.Book != nil
+	isTrack := it.Movie != nil && it.Movie.Track != nil
+	// A book is finished once per listening: not again by the stop that
+	// follows the progress report that finished it.
+	listening := d.Position > 0 || !d.Played
+	if pos != nil && kind != Start && isBook && it.Runtime > 0 {
+		// Moonfin's audiobook player reports progress but never a stop,
+		// so the end of a book also counts while it plays.
+		switch {
+		case *pos < MinAudiobookResume:
+			d.Position = 0
+		case it.Runtime-*pos < MaxAudiobookResume:
+			d.Position = 0
+			finished = listening
+		default:
+			d.Position = *pos
+		}
+	} else if pos != nil && kind != Start {
 		frac := 0.0
 		if it.Runtime > 0 {
 			frac = float64(*pos) / float64(it.Runtime)
 		}
 		switch {
+		case isTrack && it.Runtime > 0 && it.Runtime < MinResumeRuntime && frac >= MinResumeFraction:
+			// A song counts as heard once a little of it was, as in
+			// Jellyfin; it keeps no position.
+			d.Position = 0
+			finished = kind == Stop
 		case it.Runtime > 0 && frac >= MaxResumeFraction:
 			d.Position = 0
 			finished = kind == Stop

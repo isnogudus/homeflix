@@ -86,7 +86,7 @@ caches that send no credentials.
 
 | Endpoint | Auth | Notes |
 |---|---|---|
-| `GET\|POST /Items/{itemId}/PlaybackInfo` | yes | evaluates the device profile like Jellyfin's StreamBuilder; direct play only, no transcoding |
+| `GET\|POST /Items/{itemId}/PlaybackInfo` | yes | evaluates the device profile like Jellyfin's StreamBuilder; for music and audiobooks it offers the AAC conversion (see below) |
 | `GET /Videos/{itemId}/stream[.{container}]` | yes | the original file with range requests; remux and transcode parameters are ignored |
 | `GET /Items/{itemId}/Download` | yes | the original file as an attachment, for users with the download right (403 otherwise) |
 | `GET /Videos/{itemId}/AdditionalParts` | yes | later parts of a multi-part movie |
@@ -100,6 +100,54 @@ file. The result is cached in `subtitles/` in the data directory and
 removed after a scan once the video is gone or has changed. Image-based
 subtitles (PGS, DVD) are not converted. `startTicks` is ignored, since
 homeflix only serves the original file, which starts at zero.
+
+## Music and audiobooks
+
+Music libraries have `CollectionType` `music`, audiobook libraries `books`.
+Tracks are `Audio` items, children (`ParentId`) of their `MusicAlbum`;
+artists are `MusicArtist` items; books are `AudioBook` items with
+`Chapters` over the whole book and their authors as `People` of type
+`Author` (narrators as `Narrator`). The item listings below take the music
+parameters `IncludeItemTypes` (`Audio`, `MusicAlbum`, `MusicArtist`,
+`AudioBook`, `Book`, `Playlist`), `ArtistIds`, `AlbumArtistIds`,
+`ContributingArtistIds`, `GenreIds`, `Genres`, `Years`, `MinPremiereDate`,
+`MaxPremiereDate`, the play state filters and the sorts `SortName`,
+`Album`, `AlbumArtist`, `Artist`, `ParentIndexNumber`, `IndexNumber`,
+`ProductionYear`, `PremiereDate`, `DateCreated`, `DatePlayed`,
+`PlayCount`, `Runtime` and `Random`.
+
+| Endpoint | Auth | Notes |
+|---|---|---|
+| `GET /Items`, `/Users/{userId}/Items` | yes | albums, tracks, artists, books and playlists; an album as `ParentId` lists its tracks by disc and number; a library as `ParentId` without `Recursive` lists nothing (its children would be folders) |
+| `GET /Items/Latest` | yes | for a music library its newest albums, for an audiobook library its newest books |
+| `GET /UserItems/Resume` | yes | also books and long tracks; `MediaTypes` and `IncludeItemTypes` filter |
+| `GET /Artists`, `/Artists/AlbumArtists` | yes | artists of a library, or those that are album artists; `IsFavorite`, `SearchTerm`, `NameStartsWith`, paging |
+| `GET /Artists/{name}` | yes | an artist by name |
+| `GET /Genres`, `/MusicGenres`, `/Genres/{name}`, `/MusicGenres/{name}` | yes | genres of albums or books with `AlbumCount` when asked about a music or audiobook library or types |
+| `GET /Items/{itemId}/Similar` | yes | artists sharing genres; albums sharing genres or artists |
+| `GET /Items/{itemId}/InstantMix`, `/Albums/…`, `/Songs/…`, `/Artists/…`, `/Artists/InstantMix?id=`, `/MusicGenres/…`, `/Playlists/…/InstantMix` | yes | tracks of the same album artists and genres, shuffled |
+| `GET /Audio/{itemId}/Lyrics` | yes | an `.lrc` file next to the track (with times), else the lyrics tag; 404 without lyrics |
+| `GET /Audio/{itemId}/stream[.{container}]` | yes | the original file with range requests |
+| `GET /Audio/{itemId}/universal` | yes | the file when its container is in `Container`, else a redirect to the AAC conversion |
+| `GET /Audio/{itemId}/main.m3u8`, `/master.m3u8`, `/Audio/{itemId}/hls/{n}.ts` | yes (also `ApiKey`) | AAC conversion as HLS with 6-second MPEG-TS segments; a book of several files is one stream |
+| `POST /Playlists` | yes | `Name`, `Ids` (body or query); returns `Id` |
+| `GET /Playlists/{id}` | yes | `ItemIds`; playlists are private (`OpenAccess` false, no `Shares`) |
+| `POST /Playlists/{id}` | yes | renames |
+| `GET /Playlists/{id}/Items` | yes | the entries with `PlaylistItemId` |
+| `POST /Playlists/{id}/Items?Ids=`, `DELETE …?EntryIds=` | yes | adds and removes entries |
+| `POST /Playlists/{id}/Items/{entry}/Move/{index}` | yes | moves an entry |
+| `DELETE /Items/{itemId}` | yes | deletes a playlist of the user; library items are never deleted |
+| `GET\|POST /Moonfin/Bookmarks/{itemId}`, `POST …/Notes` | yes | Moonfin's audiobook bookmarks and notes, stored as the app sends them |
+
+For tracks and books, `PlaybackInfo` evaluates the audio profiles of the
+device profile; a file outside it gets `SupportsTranscoding` with a
+`TranscodingUrl` to the AAC conversion (`TranscodingContainer` `ts`,
+`TranscodingSubProtocol` `hls`) when the user's conversion level is
+*audio* or *all*. The first audio stream carries the ReplayGain track gain
+as `NormalizationGain`. Play state follows Jellyfin: a track shorter than
+five minutes counts as played after 5 % of it; a book keeps no position in
+its first five minutes and counts as played in its last five, also from
+progress reports alone, since Moonfin's audiobook player sends no stop.
 
 ## Sessions and playback reports
 
@@ -132,10 +180,11 @@ homeflix.conf(5) turns it off.
 
 - Transcoding and remuxing: HLS playlists (`/Videos/{id}/master.m3u8`),
   `/Videos/{id}/hls1/…`, audio and subtitle burn-in.
-- Series, music, books, photos and live TV.
+- Series, e-books, photos and live TV.
+- Shared playlists (`Shares`, `OpenAccess`) and smart playlists.
 - Collections made or edited by hand (`/Collections`); collections come
   from TMDB only.
 - Administration through the API: users, libraries, scheduled tasks,
   plugins, server configuration and the startup wizard.
 - Remote control, SyncPlay and session messages over the WebSocket.
-- Trickplay images, lyrics, chapter images and user avatars.
+- Trickplay images, chapter images and user avatars.

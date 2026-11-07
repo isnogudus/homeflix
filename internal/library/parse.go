@@ -158,3 +158,7 @@ func padDigits(w string) string {
 	}
 	return b.String()
 }
+
+// CleanTitle tidies a file or folder name for display: separators become
+// spaces, runs of spaces one.
+func CleanTitle(s string) string { return cleanText(s) }

@@ -150,3 +150,68 @@ a.button.primary { background: var(--accent); color: var(--accent-fg); border-co
 .playerbar label { flex-direction: row; align-items: center; gap: 0.5rem; }
 .playerbar select { font: inherit; padding: 0.3rem 0.5rem; border-radius: 8px; border: 1px solid var(--line);
 	background: var(--card); color: var(--fg); max-width: 100%; }
+/* Music and audiobooks. */
+.square .poster { aspect-ratio: 1; }
+.detail.music { display: grid; grid-template-columns: minmax(8rem, 16rem) 1fr; gap: 1.25rem; align-items: start;
+	background-image: linear-gradient(var(--bg), rgb(0 0 0 / 0) 0), var(--backdrop, none); background-size: cover; }
+.detail.music:not(:has(.cover)) { grid-template-columns: 1fr; }
+.detail.music .cover img { aspect-ratio: 1; object-fit: cover; }
+.detail.music .cover.round img { border-radius: 50%; }
+.detail .kicker { margin: 0; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.detail h1 { margin: 0.2rem 0 0.4rem; font-size: 1.8rem; }
+.detail .subtitle { margin: 0 0 0.4rem; color: var(--muted); }
+.detail .meta { margin: 0 0 0.5rem; }
+.detail .genres { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0 0 0.75rem; }
+.detail .genres > * { border: 1px solid var(--line); border-radius: 999px; padding: 0.1rem 0.6rem; font-size: 0.85rem;
+	color: var(--fg); text-decoration: none; }
+.detail .actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin: 0.75rem 0; }
+.detail .actions form { margin: 0; }
+.detail .overview { white-space: pre-line; max-width: 50rem; }
+.detail progress { width: 100%; max-width: 24rem; }
+@media (max-width: 40rem) { .detail.music { grid-template-columns: 7rem 1fr; } .detail h1 { font-size: 1.3rem; } }
+ol.tracks { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+ol.tracks > li { display: flex; align-items: center; gap: 0.25rem; border-bottom: 1px solid var(--line); }
+ol.tracks > li.disc { padding: 0.6rem 0.5rem 0.3rem; color: var(--muted); font-weight: 600; font-size: 0.9rem; }
+ol.tracks > li.played .title { color: var(--muted); }
+ol.tracks form { margin: 0; }
+ol.tracks button.track, ol.chapters button { flex: 1; display: flex; gap: 0.75rem; align-items: baseline; text-align: left;
+	border: 0; background: none; padding: 0.55rem 0.5rem; border-radius: 0; }
+ol.tracks button.track:hover, ol.chapters button:hover { background: var(--card); }
+ol.tracks .num { width: 2rem; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+ol.tracks .title { flex: 1; min-width: 0; }
+ol.tracks .title .sub { display: block; color: var(--muted); font-size: 0.85rem; }
+ol.tracks .time { color: var(--muted); font-variant-numeric: tabular-nums; }
+button.small { padding: 0.2rem 0.5rem; border: 0; background: none; color: var(--muted); }
+.toplaylist { margin: 1rem 0; }
+.toplaylist summary { cursor: pointer; color: var(--muted); }
+.toplaylist form { margin: 0.5rem 0; }
+body.withplayer main { padding-bottom: 14rem; }
+@media (min-width: 60rem) { body.withplayer main { padding-bottom: 7rem; } }
+.bar nav.main { overflow-x: auto; max-width: 100%; scrollbar-width: none; }
+.audiobar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: grid; align-items: center;
+	grid-template-columns: 3.5rem minmax(0, 1fr); grid-template-areas: "art what" "controls controls" "seek seek" "extras extras";
+	gap: 0.3rem 0.75rem; padding: 0.5rem 1rem; background: var(--card); border-top: 1px solid var(--line);
+	box-shadow: 0 -4px 18px rgb(0 0 0 / 0.15); }
+@media (min-width: 60rem) {
+	.audiobar { grid-template-columns: 3.5rem minmax(10rem, 1fr) auto minmax(14rem, 2fr) auto;
+		grid-template-areas: "art what controls seek extras"; }
+}
+.audiobar .art { grid-area: art; } .audiobar .what { grid-area: what; min-width: 0; }
+.audiobar .controls { grid-area: controls; display: flex; gap: 0.25rem; justify-content: center; }
+.audiobar .seek { grid-area: seek; display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem;
+	font-variant-numeric: tabular-nums; color: var(--muted); }
+.audiobar .seek input { flex: 1; padding: 0; }
+.audiobar .extras { grid-area: extras; display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; justify-content: flex-end; }
+.audiobar .art img { width: 3.5rem; height: 3.5rem; object-fit: cover; border-radius: 6px; display: block; }
+.audiobar .title { display: block; font-weight: 600; color: var(--fg); text-decoration: none;
+	white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.audiobar .artist { display: block; color: var(--muted); font-size: 0.85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.audiobar button { padding: 0.35rem 0.6rem; }
+.audiobar .playpause { min-width: 2.75rem; }
+.audiobar select { font: inherit; font-size: 0.85rem; padding: 0.25rem; border: 1px solid var(--line); border-radius: 6px;
+	background: var(--bg); color: var(--fg); max-width: 14rem; }
+.audiobar:not(.book) .bookonly { display: none; }
+.audiobar .queue { grid-column: 1 / -1; max-height: 40vh; overflow: auto; margin: 0; padding: 0 0 0 1.5rem; }
+.audiobar .queue li[aria-current] button { font-weight: 700; }
+.audiobar .queue button { border: 0; background: none; padding: 0.2rem 0; text-align: left; }
+.audiobar .flash { grid-column: 1 / -1; margin: 0; }

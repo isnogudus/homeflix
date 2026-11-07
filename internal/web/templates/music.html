@@ -1,0 +1,27 @@
+{{define "title"}}{{t "music"}}{{end}}
+{{define "content"}}
+<nav class="tabs" aria-label="{{t "music"}}">
+	<a href="/web/music"{{if eq .Data.Tab "albums"}} aria-current="page"{{end}}>{{t "albums"}}</a>
+	<a href="/web/music/artists"{{if eq .Data.Tab "artists"}} aria-current="page"{{end}}>{{t "artists"}}</a>
+	<a href="/web/music/playlists"{{if eq .Data.Tab "playlists"}} aria-current="page"{{end}}>{{t "playlists"}}</a>
+</nav>
+{{if .Data.Recent}}
+<section class="row" data-queue="{{.Data.Queue}}">
+	<h2>{{t "recentlyPlayed"}}</h2>
+	{{template "tracklist" (dict "Rows" .Data.Recent "Session" .Session)}}
+</section>
+{{end}}
+<div class="toolbar">
+	<h1>{{if .Data.Genre}}{{.Data.Genre}} <a class="clear" href="{{.Data.ClearGenre}}" aria-label="{{t "clearFilter"}}">×</a>{{else}}{{t .Data.Tab}}{{end}} <span class="count">{{.Data.Total}}</span></h1>
+	{{with .Data.Grid}}<nav class="pills" aria-label="{{t "sortBy"}}">{{range .Sorts}}<a href="{{.URL}}"{{if .Current}} aria-current="page"{{end}}>{{t .Label}}</a>{{end}}</nav>{{end}}
+</div>
+{{if eq .Data.Tab "playlists"}}
+<form class="inline" method="post" action="/web/music/playlists">{{template "csrf" .}}
+	<input name="name" required placeholder="{{t "playlistName"}}" aria-label="{{t "playlistName"}}">
+	<button>{{t "newPlaylist"}}</button>
+</form>
+{{end}}
+{{with .Data.Grid}}{{template "letters" .}}{{end}}
+{{if .Data.Cards}}<div class="square">{{template "cards" .Data.Cards}}</div>{{else}}<p class="note">{{t "nothingHere"}}</p>{{end}}
+{{with .Data.Grid}}{{template "pager" .}}{{end}}
+{{end}}

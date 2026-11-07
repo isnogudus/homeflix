@@ -75,15 +75,17 @@ func (s *Store) ResetKeyframes(ctx context.Context) error {
 	return err
 }
 
-// UnindexedFiles returns the probed files of present items without
-// current keyframes, neither a list nor an error. Files whose probe failed
-// are left out: they are not played.
+// UnindexedFiles returns the probed files of present movies and extras
+// without current keyframes, neither a list nor an error. Files whose
+// probe failed are left out: they are not played. Audio files need no
+// index: they are converted, never cut at keyframes.
 func (s *Store) UnindexedFiles(ctx context.Context) ([]MediaFile, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT f.id, f.item_id, f.version, f.part, f.path, f.size, f.mtime,
-		NULL, NULL, f.probed_at, f.duration_ms, f.container, f.bit_rate
+		NULL, NULL, f.probed_at, f.duration_ms, f.container, f.bit_rate, NULL
 		FROM media_files f JOIN items i ON i.id = f.item_id
 		LEFT JOIN keyframes k ON k.file_id = f.id AND k.size = f.size AND k.mtime = f.mtime
 		WHERE f.probe IS NOT NULL AND i.missing_since IS NULL AND k.file_id IS NULL
+			AND i.type IN ('Movie', 'Video')
 		ORDER BY f.path`)
 	if err != nil {
 		return nil, err
@@ -126,7 +128,7 @@ func (s *Store) KeyframeStats(ctx context.Context) (KeyframeStats, error) {
 			coalesce(k.note, '') != '', count(*), coalesce(sum(length(k.times)), 0)
 		FROM media_files f JOIN items i ON i.id = f.item_id
 		LEFT JOIN keyframes k ON k.file_id = f.id AND k.size = f.size AND k.mtime = f.mtime
-		WHERE f.probe IS NOT NULL AND i.missing_since IS NULL
+		WHERE f.probe IS NOT NULL AND i.missing_since IS NULL AND i.type IN ('Movie', 'Video')
 		GROUP BY 1, 2, 3, 4`)
 	if err != nil {
 		return KeyframeStats{}, err

@@ -1,0 +1,24 @@
+{{define "title"}}{{.Data.Album.Name}}{{end}}
+{{define "content"}}
+{{$al := .Data.Album}}
+<article class="detail music" data-queue="{{.Data.Queue}}">
+	<div class="cover">{{if .Data.Cover}}<img src="{{.Data.Cover}}" alt="">{{end}}</div>
+	<div class="info">
+		<p class="kicker">{{t "album"}}</p>
+		<h1>{{$al.Name}}</h1>
+		<p class="meta">{{range $i, $a := $al.Artists}}{{if $i}}, {{end}}<a href="/web/music/artists/{{$a.ID}}">{{$a.Name}}</a>{{end}}
+			{{if $al.Year}} · {{$al.Year}}{{end}} · {{len $al.Tracks}} {{t "tracks"}} · {{.Data.Duration}}</p>
+		{{with .Data.Genres}}<p class="genres">{{range .}}<a href="{{.URL}}">{{.Label}}</a>{{end}}</p>{{end}}
+		<div class="actions">
+			<button class="primary" type="button" data-play="0">▶ {{t "play"}}</button>
+			<button type="button" data-shuffle>{{t "shuffle"}}</button>
+			<button type="button" data-enqueue>{{t "addToQueue"}}</button>
+			{{template "favorite" (dict "ID" $al.ID "On" .Data.Favorite "Back" (print "/web/music/albums/" $al.ID) "Session" .Session)}}
+		</div>
+		{{with $al.Overview}}<p class="overview">{{.}}</p>{{end}}
+	</div>
+</article>
+{{template "tracklist" (dict "Rows" .Data.Tracks "Discs" .Data.Discs "Session" .Session)}}
+{{template "toplaylist" (dict "IDs" (trackIDs $al.Tracks) "Playlists" .Data.Playlists "Back" (print "/web/music/albums/" $al.ID) "Session" .Session)}}
+{{with .Data.Similar}}<section class="row"><h2>{{t "similar"}}</h2><div class="square">{{template "cards" .}}</div></section>{{end}}
+{{end}}

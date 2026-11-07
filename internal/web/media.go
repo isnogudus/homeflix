@@ -261,7 +261,9 @@ func defaultAudio(info media.Info) *media.Stream {
 }
 
 // contentTypes of the containers browsers play directly.
-var contentTypes = map[string]string{".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm"}
+var contentTypes = map[string]string{".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm",
+	".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".m4b": "audio/mp4", ".aac": "audio/aac", ".flac": "audio/flac",
+	".ogg": "audio/ogg", ".oga": "audio/ogg", ".opus": "audio/ogg", ".wav": "audio/wav"}
 
 // stream serves a file of a movie for the player, with ranges for seeking.
 func (s *Server) stream(w http.ResponseWriter, r *http.Request, sess *session) {

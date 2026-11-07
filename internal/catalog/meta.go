@@ -40,6 +40,10 @@ type Facet struct {
 	Name   string
 	TMDbID int // people only
 	Movies int
+	// Albums and Books count the albums and audiobooks of a music or
+	// audiobook genre.
+	Albums, Books int
+	libs          map[string]bool // libraries of a music or audiobook genre
 	// Person is what TMDB knows about a person, nil if nothing yet.
 	Person *PersonInfo
 }
@@ -93,6 +97,10 @@ func facetID(kind, key string) string {
 func GenreID(name string) string  { return facetID("genre", name) }
 func PersonID(tmdbID int) string  { return facetID("person", strconv.Itoa(tmdbID)) }
 func StudioID(name string) string { return facetID("studio", name) }
+
+// MusicGenreID is the ID of a genre of music or audiobooks; genres of
+// movies of the same name are other items.
+func MusicGenreID(name string) string { return facetID("musicgenre", name) }
 
 func (m *Movie) applyMeta(md store.Metadata, opt Options) {
 	if md.Status != store.MetaMatched || md.Data == "" {

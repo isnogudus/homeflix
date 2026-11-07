@@ -4,6 +4,17 @@ package web
 // after a form (ok=…, err=…) must exist in "en".
 var texts = map[string]map[string]string{
 	"en": {
+		"music": "Music", "albums": "Albums", "artists": "Artists", "playlists": "Playlists", "album": "Album",
+		"artist": "Artist", "playlist": "Playlist", "tracks": "tracks", "audiobooks": "Audiobooks", "audiobook": "Audiobook",
+		"recentlyPlayed": "Recently played", "newAlbums": "New albums", "continueListening": "Continue listening",
+		"playlistName": "Name of the playlist", "newPlaylist": "New playlist", "addToPlaylist": "Add to a playlist",
+		"deletePlaylist": "Delete playlist", "missingEntries": "no longer in the library", "nothingHere": "Nothing here yet.",
+		"shuffle": "Shuffle", "addToQueue": "Add to queue", "playNext": "Play next",
+		"appearsOn": "Also on", "sortAuthor": "Author", "readBy": "read by", "chapters": "Chapters",
+		"moreByAuthor": "More by the author", "disc": "Disc", "previousTrack": "Previous", "nextTrack": "Next",
+		"back30": "Back 30 seconds", "forward30": "Forward 30 seconds", "playPause": "Play or pause",
+		"position": "Position", "speed": "Speed", "sleepTimer": "Sleep timer", "sleepOff": "No timer", "queue": "Queue",
+		"closePlayer": "Close player", "withoutAlbum": "without album tag",
 
 		"navigation": "Navigation", "searchPlaceholder": "Search movies, people", "account": "Account",
 		"continue": "Continue watching", "latest": "Recently added", "favorites": "Favourites",
@@ -123,6 +134,17 @@ var texts = map[string]map[string]string{
 		"codeUsed": "This code was confirmed already.", "codeLocked": "Too many wrong codes. Try again in 15 minutes.",
 	},
 	"de": {
+		"music": "Musik", "albums": "Alben", "artists": "Interpreten", "playlists": "Wiedergabelisten", "album": "Album",
+		"artist": "Interpret", "playlist": "Wiedergabeliste", "tracks": "Titel", "audiobooks": "Hörbücher", "audiobook": "Hörbuch",
+		"recentlyPlayed": "Zuletzt gehört", "newAlbums": "Neue Alben", "continueListening": "Weiterhören",
+		"playlistName": "Name der Liste", "newPlaylist": "Neue Liste", "addToPlaylist": "Zu einer Liste hinzufügen",
+		"deletePlaylist": "Liste löschen", "missingEntries": "nicht mehr in der Bibliothek", "nothingHere": "Hier ist noch nichts.",
+		"shuffle": "Zufällig", "addToQueue": "In die Warteschlange", "playNext": "Als Nächstes",
+		"appearsOn": "Auch auf", "sortAuthor": "Autor", "readBy": "gelesen von", "chapters": "Kapitel",
+		"moreByAuthor": "Mehr vom Autor", "disc": "CD", "previousTrack": "Zurück", "nextTrack": "Weiter",
+		"back30": "30 Sekunden zurück", "forward30": "30 Sekunden vor", "playPause": "Abspielen oder anhalten",
+		"position": "Position", "speed": "Tempo", "sleepTimer": "Schlummer", "sleepOff": "Kein Timer", "queue": "Warteschlange",
+		"closePlayer": "Player schließen", "withoutAlbum": "ohne Album-Tag",
 
 		"navigation": "Navigation", "searchPlaceholder": "Filme, Personen suchen", "account": "Konto",
 		"continue": "Weiterschauen", "latest": "Zuletzt hinzugefügt", "favorites": "Favoriten",

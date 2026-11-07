@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="{{asset "style.css"}}">
 <link rel="icon" href="{{asset "favicon.svg"}}" type="image/svg+xml">
 {{template "scripts" .}}
+{{if .Data.AudioPlayer}}<script src="{{asset "audio.js"}}" defer></script>{{end}}
 </head>
 <body>
 <header class="bar">
@@ -17,6 +18,8 @@
 		<a href="/web/"{{if eq $.Data.Nav "home"}} aria-current="page"{{end}}>{{t "home"}}</a>
 		<a href="/web/movies"{{if eq $.Data.Nav "movies"}} aria-current="page"{{end}}>{{t "movies"}}</a>
 		<a href="/web/collections"{{if eq $.Data.Nav "collections"}} aria-current="page"{{end}}>{{t "collections"}}</a>
+		{{if $.Data.HasMusic}}<a href="/web/music"{{if eq $.Data.Nav "music"}} aria-current="page"{{end}}>{{t "music"}}</a>{{end}}
+		{{if $.Data.HasBooks}}<a href="/web/books"{{if eq $.Data.Nav "books"}} aria-current="page"{{end}}>{{t "audiobooks"}}</a>{{end}}
 	</nav>
 	<form class="find" method="get" action="/web/search" role="search">
 		<input type="search" name="q" value="{{$.Data.Query}}" placeholder="{{t "searchPlaceholder"}}" aria-label="{{t "search"}}">
@@ -31,5 +34,6 @@
 <main>
 {{template "content" .}}
 </main>
+{{if .Data.AudioPlayer}}{{template "audioplayer" .}}{{end}}
 </body>
 </html>

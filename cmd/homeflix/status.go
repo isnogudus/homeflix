@@ -101,7 +101,11 @@ func settingsOf(cfg config.Config, configPath string) []web.Setting {
 		{Name: "sort articles", Value: strings.Join(cfg.SortArticles, ", ")},
 	}
 	for _, l := range cfg.Libraries {
-		out = append(out, web.Setting{Name: "library " + l.Name, Value: strings.Join(l.Paths, ", ")})
+		v := strings.Join(l.Paths, ", ")
+		if l.Type != "" && l.Type != config.Movies {
+			v = "type " + l.Type + ": " + v
+		}
+		out = append(out, web.Setting{Name: "library " + l.Name, Value: v})
 	}
 	if t := cfg.TMDB; t != nil {
 		out = append(out, web.Setting{Name: "tmdb token file", Value: t.TokenFile},

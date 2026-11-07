@@ -69,6 +69,29 @@ type BaseItemDto struct {
 	Height                  int                          `json:"Height,omitempty"`
 	RemoteTrailers          []any                        `json:"RemoteTrailers"`
 	PlayAccess              string                       `json:"PlayAccess"`
+
+	// Music and audiobooks.
+	Album                    string       `json:"Album,omitempty"`
+	AlbumID                  string       `json:"AlbumId,omitempty"`
+	AlbumPrimaryImageTag     string       `json:"AlbumPrimaryImageTag,omitempty"`
+	AlbumArtist              string       `json:"AlbumArtist,omitempty"`
+	AlbumArtists             []NameIDPair `json:"AlbumArtists,omitempty"`
+	Artists                  []string     `json:"Artists,omitempty"`
+	ArtistItems              []NameIDPair `json:"ArtistItems,omitempty"`
+	IndexNumber              *int         `json:"IndexNumber,omitempty"`
+	ParentIndexNumber        *int         `json:"ParentIndexNumber,omitempty"`
+	SongCount                *int         `json:"SongCount,omitempty"`
+	AlbumCount               *int         `json:"AlbumCount,omitempty"`
+	ParentPrimaryImageItemID string       `json:"ParentPrimaryImageItemId,omitempty"`
+	ParentPrimaryImageTag    string       `json:"ParentPrimaryImageTag,omitempty"`
+	ParentBackdropItemID     string       `json:"ParentBackdropItemId,omitempty"`
+	ParentBackdropImageTags  []string     `json:"ParentBackdropImageTags,omitempty"`
+	ParentLogoItemID         string       `json:"ParentLogoItemId,omitempty"`
+	ParentLogoImageTag       string       `json:"ParentLogoImageTag,omitempty"`
+	SeriesName               string       `json:"SeriesName,omitempty"`
+	HasLyrics                bool         `json:"HasLyrics,omitempty"`
+	NormalizationGain        *float64     `json:"NormalizationGain,omitempty"`
+	PlaylistItemID           string       `json:"PlaylistItemId,omitempty"`
 }
 
 // NameIDPair names a genre or studio.
@@ -137,6 +160,8 @@ type MediaSourceInfo struct {
 	Bitrate                    int64             `json:"Bitrate,omitempty"`
 	RequiredHTTPHeaders        map[string]string `json:"RequiredHttpHeaders"`
 	TranscodingSubProtocol     string            `json:"TranscodingSubProtocol"`
+	TranscodingURL             string            `json:"TranscodingUrl,omitempty"`
+	TranscodingContainer       string            `json:"TranscodingContainer,omitempty"`
 	DefaultAudioStreamIndex    *int              `json:"DefaultAudioStreamIndex,omitempty"`
 	DefaultSubtitleStreamIndex *int              `json:"DefaultSubtitleStreamIndex,omitempty"`
 	HasSegments                bool              `json:"HasSegments"`
@@ -195,6 +220,8 @@ type MediaStreamDto struct {
 	DvBlSignalCompatibilityID *int    `json:"DvBlSignalCompatibilityId,omitempty"`
 	DeliveryMethod            string  `json:"DeliveryMethod,omitempty"`
 	DeliveryURL               string  `json:"DeliveryUrl,omitempty"`
+	// NormalizationGain is the ReplayGain track gain in dB of a track.
+	NormalizationGain *float64 `json:"NormalizationGain,omitempty"`
 }
 
 // ChapterInfoDto is a chapter mark.
@@ -451,8 +478,13 @@ func describeFile(d *BaseItemDto, info media.Info) {
 // itemDto describes a movie or extra. A nil fieldSet means all fields, as
 // for single-item requests. user holds the requesting user's state.
 func (s *Server) itemDto(m *catalog.Movie, fields fieldSet, sess *Session, user map[string]store.UserData) BaseItemDto {
-	if m.Set != nil {
+	switch {
+	case m.Set != nil:
 		return s.collectionDto(m.Set, fields, user)
+	case m.Track != nil:
+		return s.trackDto(m, fields, sess, user)
+	case m.Book != nil:
+		return s.bookDto(m, fields, sess, user)
 	}
 	d := s.baseDto(m, m.ID)
 	d.CanDownload = sess != nil && sess.User.CanDownload

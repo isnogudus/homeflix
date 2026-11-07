@@ -2,6 +2,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"flag"
@@ -274,6 +275,7 @@ func serve(args []string, stdout, stderr io.Writer) error {
 	api := &jellyfin.Server{
 		ServerID:         serverID,
 		ServerName:       cfg.ServerName,
+		HLS:              remux,
 		Store:            db,
 		Catalog:          cat,
 		Images:           imgs,
@@ -417,7 +419,7 @@ func runScans(ctx context.Context, sc *library.Scanner, interval time.Duration, 
 		}
 		scans.finish(rep, err)
 		for _, l := range rep.Libraries {
-			log.Info("library scanned", "library", l.Name, "movies", l.Movies, "added", l.Added,
+			log.Info("library scanned", "library", l.Name, cmp.Or(l.Unit, "movies"), l.Movies, "added", l.Added,
 				"updated", l.Updated, "moved", l.Moved, "returned", l.Returned, "missing", l.Missing,
 				"files_added", l.FilesAdded, "files_changed", l.FilesChanged, "files_removed", l.FilesRemoved,
 				"unavailable", len(l.UnavailablePaths))

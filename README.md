@@ -18,7 +18,8 @@ movies directly, including alternate versions and movies split into parts;
 watch state, resume positions and favourites are kept per user. With a TMDB
 token, movies get titles, overviews, genres, cast, ratings and artwork.
 [docs/api-coverage.md](docs/api-coverage.md) lists the Jellyfin endpoints
-homeflix answers.
+homeflix answers. Stage 3 ([plan](docs/plan-stage3.md)) adds music and
+audiobook libraries for Moonfin and the web client.
 
 Playback is direct play only: the client receives the original file and
 decodes it. PlaybackInfo evaluates the client's device profile as Jellyfin
@@ -115,6 +116,47 @@ homeflix stats -config /usr/local/etc/homeflix.conf           # containers, code
 homeflix keyframes /media/movies/Film.mkv                     # keyframes as the server finds them
 ```
 
+## Music and audiobooks
+
+A library with `type music` holds music, one with `type audiobooks`
+audiobooks; Jellyfin clients see them as `music` and `books` libraries.
+
+```
+library "Musik" {
+	type music
+	path { "/media/music/flac", "/media/music/mp3" }
+}
+library "Hörbücher" {
+	type audiobooks
+	path "/media/audiobooks"
+}
+```
+
+Music is read from the tags: every audio file is a track, and albums and
+artists are what the album, album artist and artist tags (and the
+MusicBrainz IDs, where there are some) say, whatever folders the files lie
+in. An album split into disc folders is one album with discs; an artist
+with albums in two directories is one artist. `album.nfo` and `artist.nfo`
+files take precedence over the tags; covers come from `folder.jpg` or
+`cover.jpg`, else from the picture in the tracks; artist folders give
+`folder.jpg`, `backdrop.jpg` and `logo.png`; an `.lrc` file next to a track
+gives synchronised lyrics. IDs of albums and artists are derived from what
+identifies them, so favourites and play counts survive rescans.
+
+An audiobook is a folder of audio files, played one after another as one
+stream with one chapter per file, or a single file such as an `.m4b` with
+its own chapters. Audiobookshelf's `metadata.json` (title, authors,
+narrators, series, description, chapters) and `cover.jpg` are read when
+they are there. Positions follow Jellyfin's audiobook rules: nothing is
+kept in the first five minutes, and a book counts as heard in its last
+five.
+
+Files the player cannot decode (WMA, Musepack, or a book of several files)
+are converted to AAC on the fly as HLS, for users whose conversion level
+allows it; this takes a small share of one core. Playlists made in Moonfin
+or the web client are kept per user; Moonfin's audiobook bookmarks and
+notes are kept too. Nothing about music or books is looked up outside.
+
 ## Metadata from TMDB
 
 Without further configuration homeflix stays offline: titles come from the
@@ -169,7 +211,11 @@ grouping into collections; search over movies, people and collections;
 details with cast and crew, versions, audio and subtitle tracks and similar
 movies; collection and person pages; and an account page to change the
 password, add and remove passkeys, connect apps with Quick Connect and
-sign out devices. The player opens on the movie page, so that the
+sign out devices. With music and audiobook libraries there are pages for
+albums, artists, playlists and books with chapters, and an audio player at
+the bottom of every page with a queue, and for books speed, chapters and a
+sleep timer; while it plays, links and forms load their page into the
+content area, so the music goes on while you browse. The player opens on the movie page, so that the
 click on play starts it (Safari and Firefox let a page play sound only
 after a click on that page); it plays a movie's parts one after another,
 keeps the position in sync with Jellyfin clients, and offers the audio

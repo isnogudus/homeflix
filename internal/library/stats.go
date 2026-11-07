@@ -101,7 +101,8 @@ func label(codec, profile string) string {
 	return codec + " " + profile
 }
 
-// CollectStats reads every file of present items.
+// CollectStats reads every file of present movies and extras; music and
+// audiobooks are counted elsewhere.
 func CollectStats(ctx context.Context, st *store.Store) (Stats, error) {
 	s := Stats{
 		Containers: Counter{}, VideoCodecs: Counter{}, Resolutions: Counter{}, HDR: Counter{},
@@ -109,6 +110,9 @@ func CollectStats(ctx context.Context, st *store.Store) (Stats, error) {
 	}
 	seenItems := map[string]bool{}
 	err := st.AllFiles(ctx, func(f store.ProbedFile) error {
+		if f.ItemType != "Movie" && f.ItemType != "Video" {
+			return nil
+		}
 		if !seenItems[f.ItemID] {
 			seenItems[f.ItemID] = true
 			if f.ItemType == "Movie" {

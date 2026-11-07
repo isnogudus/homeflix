@@ -193,9 +193,10 @@ Musepack files as for Moonfin. All audiobooks play directly.
 
 ### 2.6 Cost
 
-- ffprobe takes about 11 ms per track once the file is cached; the first
-  scan of 26,600 tracks and 235 books is bound by reading the disks and is
-  measured in A0. Probing already stores tags and chapters
+- ffprobe takes about 11 ms per track once the file is cached. Measured in
+  A0: the first scan with probing of all 26,889 files (music and books)
+  took 1 min 55 s with 6 probe workers; an unchanged rescan takes about a
+  second; the database grows by 19 MB; the catalog loads in 0.65 s. Probing already stores tags and chapters
   (`-show_format -show_chapters`).
 - Converting a track to AAC takes a small share of one core; audio
   conversions are cheap enough not to need a limit of their own.
@@ -268,7 +269,10 @@ audiobook library one item per book.
   (`AlbumId`, `AlbumPrimaryImageTag`) and have no picture of their own.
 - Artist: `folder.jpg` (Primary), `backdrop.jpg` (Backdrop) and
   `logo.png` (Logo) from the artist folder, else the cover of the newest
-  album. The `.nfo` files are not read.
+  album.
+- `album.nfo` and `artist.nfo` take precedence over the tags for what
+  they hold (title, sort name, year, genres, MusicBrainz IDs, review or
+  biography); see section 6.
 - Book: `cover.jpg`, else the embedded picture.
 
 ### 3.4 Playback
@@ -388,26 +392,55 @@ artists are the first items that are not files.
   length, segment continuity, seek restart.
 - Manual acceptance in Moonfin on the iMac and in the three browsers.
 
-## 6. Open decisions
+## 6. Decisions
 
-1. **Clients.** The plan targets Moonfin and the web client. Dedicated
-   music apps for Jellyfin (Finamp, for example) use mostly the same
-   endpoints, but each needs its own check; which ones matter?
-2. **Persistent player in the web client.** Replacing the content area
-   (3.8) is the most comfortable way. A separate player window would be
-   simpler to build and keep the pages as they are, at the price of a
-   second window.
-3. **Albums without MusicBrainz ID.** By tags (album artist and title, as
-   planned) or by folder? Tags merge an album split over two folders;
-   folders keep two different albums of the same name apart. With 85 %
-   MusicBrainz IDs the question touches few albums.
-4. **Leftover Jellyfin files.** The plan uses the artist pictures and
-   ignores the `.nfo` files. `artist.nfo` may hold biographies; reading
-   them would be local and cheap.
-5. **Multi-file books.** Only three books are folders of MP3s. Instead of
-   playing them as one stream (3.4), they could be converted to `.m4b`
-   once, outside homeflix; homeflix would then only need single-file
-   books. The plan keeps the stream, because new books may come as
-   folders too.
-6. **Shared playlists.** Private per user for now; Jellyfin 10.9 shares
-   playlists with other users, which could follow.
+Settled on 2026-11-07:
+
+1. **Clients.** Moonfin and the web client for now; other clients
+   (Finamp, for example) later.
+2. **Persistent player in the web client.** Replacing the content area, as
+   in 3.8.
+3. **Albums without MusicBrainz ID.** By tags, as planned (album artist and
+   title). Part of the library was organised with beets, which writes the
+   same tags as Picard.
+4. **`.nfo` files.** Read wherever they are and take precedence over the
+   tags: `album.nfo` for albums, `artist.nfo` for artists (name, sort name,
+   biography, genres, MusicBrainz IDs, years), as Jellyfin does.
+5. **Multi-file books.** Played as one stream; converting them to `.m4b`
+   may be considered later.
+6. **Shared playlists.** Later. The data model leaves room for them: a
+   table of shares (user, may edit) next to the owner, reported as
+   Jellyfin's `Shares` and `OpenAccess`.
+
+## 7. Status
+
+Built on 2026-11-07, A0 to A6, checked with unit and API tests, the smoke
+test (a generated album with an MP3 and a WMA track, and an M4B with
+chapters) and a throwaway instance over the real collections in Chrome.
+Not yet checked: Moonfin itself, Safari and Firefox.
+
+Found on the real collections:
+
+- 26,578 tracks, 2,062 albums, 2,689 artists (842 of them album
+  artists), 232 books, 210 genres.
+- 12 FLAC files of one album cannot be read by the account homeflix runs
+  as (permission denied); they are left out and reported by the scan.
+- 452 albums carry the genre "Data", written by a tagging tool; homeflix
+  shows the tags as they are.
+- 99 books have no chapters in their files nor in `metadata.json`.
+
+Built differently from the plan:
+
+- Sidecar files (`.nfo`, `metadata.json`, pictures, `.lrc`) are recorded by
+  the scanner in a table of their own, so the catalog finds them without
+  touching the disks; descriptions are read once and again only when they
+  change.
+- The tags of a track are kept as JSON in a column of its media file
+  (`audio_meta`) instead of a table of columns.
+- Tracks and books are items of the catalog like movies, which gives them
+  the media sources, playback, play state and images of movies; albums and
+  artists are built in memory with derived IDs.
+- A library's children without `Recursive` are none: Moonfin asks for them
+  to queue a book's "siblings", and Jellyfin's answer would be folders.
+- In the web client the queue is kept in the browser's session storage, so
+  after a full page load the player comes back paused where it was.

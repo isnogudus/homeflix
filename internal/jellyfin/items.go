@@ -45,7 +45,7 @@ func (s *Server) registerItems(rt *Router) {
 	for _, p := range []string{"/MediaSegments/{itemId}", "/Shows/NextUp", "/LiveTv/Channels"} {
 		rt.HandleFunc(http.MethodGet, p, s.authed(s.emptyItems))
 	}
-	rt.HandleFunc(http.MethodGet, "/Genres", s.authed(s.facets("genre", "Genre")))
+	rt.HandleFunc(http.MethodGet, "/Genres", s.authed(s.genres))
 	rt.HandleFunc(http.MethodGet, "/Persons", s.authed(s.facets("person", "Person")))
 	rt.HandleFunc(http.MethodGet, "/Studios", s.authed(s.facets("studio", "Studio")))
 }
@@ -256,10 +256,24 @@ func (s *Server) getItems(w http.ResponseWriter, r *http.Request, sess *Session)
 	}
 
 	parent := normalizeID(queryValue(r, "ParentId"))
+	if containsFold(listParam(r, "IncludeItemTypes"), "Playlist") {
+		s.userPlaylists(w, r, u, user)
+		return
+	}
+	if parent != "" {
+		if p, err := s.Store.Playlist(r.Context(), parent); err == nil && (p.UserID == u.ID || sess.User.IsAdmin) {
+			writeJSON(w, http.StatusOK, s.playlistEntries(r, sess, p, user))
+			return
+		}
+	}
 	recursive := boolParam(r, "Recursive")
 	search := queryValue(r, "SearchTerm")
 	if parent == "" && (recursive == nil || !*recursive) && search == "" {
 		writeJSON(w, http.StatusOK, s.viewsResult())
+		return
+	}
+	if wantsAudio(r, snap, parent) {
+		s.audioItems(w, r, sess, snap, user, fields, parent)
 		return
 	}
 	q := catalog.Query{
@@ -338,6 +352,15 @@ func (s *Server) anyItemDto(snap *catalog.Snapshot, id string, fields fieldSet, 
 	if c, ok := snap.Collection(id); ok {
 		return s.collectionDto(c, fields, user), true
 	}
+	if al, ok := snap.Album(id); ok {
+		return s.albumDto(al, fields, user), true
+	}
+	if a, ok := snap.Artist(id); ok {
+		return s.artistDto(a, fields, user), true
+	}
+	if f, ok := snap.MusicGenre(id); ok {
+		return s.musicGenreDto(f, "MusicGenre"), true
+	}
 	if f, ok := snap.Genre(id); ok {
 		return s.facetDto(f, "Genre", fields), true
 	}
@@ -348,6 +371,16 @@ func (s *Server) anyItemDto(snap *catalog.Snapshot, id string, fields fieldSet, 
 		return s.facetDto(f, "Studio", fields), true
 	}
 	return BaseItemDto{}, false
+}
+
+// genres lists the genres of movies, or of music and audiobooks when the
+// request is about them.
+func (s *Server) genres(w http.ResponseWriter, r *http.Request, sess *Session) {
+	if wantsMusicGenres(r, s.Catalog.Snapshot()) {
+		s.musicGenres("Genre")(w, r, sess)
+		return
+	}
+	s.facets("genre", "Genre")(w, r, sess)
 }
 
 // facets lists genres, people or studios, optionally of one library and
@@ -389,8 +422,13 @@ func (s *Server) getItem(w http.ResponseWriter, r *http.Request, sess *Session) 
 	if !ok {
 		return
 	}
-	d, ok := s.anyItemDto(s.Catalog.Snapshot(), normalizeID(r.PathValue("itemId")), nil, sess, user)
+	id := normalizeID(r.PathValue("itemId"))
+	d, ok := s.anyItemDto(s.Catalog.Snapshot(), id, nil, sess, user)
 	if !ok {
+		if p, err := s.Store.Playlist(r.Context(), id); err == nil && (p.UserID == u.ID || sess.User.IsAdmin) {
+			writeJSON(w, http.StatusOK, s.playlistDto(p, user))
+			return
+		}
 		http.NotFound(w, r)
 		return
 	}
@@ -410,10 +448,19 @@ func (s *Server) latestItems(w http.ResponseWriter, r *http.Request, sess *Sessi
 	out := []BaseItemDto{}
 	parent := normalizeID(queryValue(r, "ParentId"))
 	if parent != "" {
-		if _, ok := snap.Library(parent); !ok {
+		l, ok := snap.Library(parent)
+		if !ok {
 			writeJSON(w, http.StatusOK, out)
 			return
 		}
+		if isAudioLibrary(l) {
+			s.audioLatest(w, r, sess, snap, user, l.ID, l.CollectionType == "books")
+			return
+		}
+	}
+	if len(audioTypes(r)) > 0 {
+		s.audioLatest(w, r, sess, snap, user, "", false)
+		return
 	}
 	if noResults(r) {
 		writeJSON(w, http.StatusOK, out)
@@ -453,7 +500,17 @@ func (s *Server) resumeItems(w http.ResponseWriter, r *http.Request, sess *Sessi
 	snap := s.Catalog.Snapshot()
 	fields := parseFields(queryValue(r, "Fields"))
 	var items []BaseItemDto
+	media := listParam(r, "MediaTypes")
+	types := audioTypes(r)
+	movieTypes := containsFold(listParam(r, "IncludeItemTypes"), "Movie", "Video")
 	for _, res := range snap.Resume(user, normalizeID(queryValue(r, "ParentId")), 0) {
+		audio := res.Movie.Track != nil || res.Movie.Book != nil
+		switch {
+		case len(media) > 0 && !containsFold(media, map[bool]string{true: "Audio", false: "Video"}[audio]),
+			len(types) > 0 && !movieTypes && (!audio || !types[res.Movie.Type]),
+			len(types) == 0 && movieTypes && audio:
+			continue
+		}
 		if res.Index == 0 {
 			items = append(items, s.itemDto(res.Movie, fields, sess, user))
 		} else {
@@ -490,11 +547,14 @@ func (s *Server) itemFilters2(w http.ResponseWriter, r *http.Request, sess *Sess
 func (s *Server) itemCounts(w http.ResponseWriter, r *http.Request, sess *Session) {
 	snap := s.Catalog.Snapshot()
 	n := len(snap.AllMovies())
-	counts := map[string]int{"MovieCount": n, "ItemCount": n}
-	for _, k := range []string{"SeriesCount", "EpisodeCount", "ArtistCount", "ProgramCount", "TrailerCount",
-		"SongCount", "AlbumCount", "MusicVideoCount", "BoxSetCount", "BookCount"} {
+	counts := map[string]int{"MovieCount": n}
+	for _, k := range []string{"SeriesCount", "EpisodeCount", "ProgramCount", "TrailerCount",
+		"MusicVideoCount", "BoxSetCount"} {
 		counts[k] = 0
 	}
+	counts["SongCount"], counts["AlbumCount"] = len(snap.Tracks()), len(snap.Albums())
+	counts["ArtistCount"], counts["BookCount"] = len(snap.Artists()), len(snap.Books())
+	counts["ItemCount"] = n + counts["SongCount"] + counts["BookCount"]
 	writeJSON(w, http.StatusOK, counts)
 }
 
@@ -509,6 +569,14 @@ func (s *Server) ancestors(w http.ResponseWriter, r *http.Request, sess *Session
 		writeJSON(w, http.StatusOK, out)
 		return
 	}
+	if al, ok := snap.Album(id); ok {
+		out := []BaseItemDto{}
+		if l, ok := snap.Library(al.LibraryID); ok {
+			out = append(out, s.viewDto(l))
+		}
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
 	m, ok := snap.Item(id)
 	if !ok {
 		p, isPart := snap.Part(id)
@@ -519,6 +587,9 @@ func (s *Server) ancestors(w http.ResponseWriter, r *http.Request, sess *Session
 		m = p.Movie
 	}
 	out := []BaseItemDto{}
+	if m.Track != nil && m.Track.Album != nil {
+		out = append(out, s.albumDto(m.Track.Album, fieldSet{}, nil))
+	}
 	if m.Parent != nil {
 		out = append(out, s.itemDto(m.Parent, fieldSet{}, sess, nil))
 	}
@@ -531,7 +602,11 @@ func (s *Server) ancestors(w http.ResponseWriter, r *http.Request, sess *Session
 // similarItems lists movies sharing genres with the item.
 func (s *Server) similarItems(w http.ResponseWriter, r *http.Request, sess *Session) {
 	snap := s.Catalog.Snapshot()
-	m, ok := snap.Item(normalizeID(r.PathValue("itemId")))
+	id := normalizeID(r.PathValue("itemId"))
+	if s.similarMusic(w, r, sess, snap, id) {
+		return
+	}
+	m, ok := snap.Item(id)
 	if !ok {
 		writeJSON(w, http.StatusOK, QueryResult[BaseItemDto]{Items: []BaseItemDto{}})
 		return

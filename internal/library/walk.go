@@ -31,6 +31,7 @@ type Extra struct {
 // a folder holding versions, parts and extras.
 type Entry struct {
 	Path   string // the folder, or the (first) file for movies without one
+	Type   string // item type: "Movie" (also for ""), "Audio" or "AudioBook"
 	Name   Name   // title, year and IDs; Part and Version are unused
 	Files  []File // sorted by version, then part
 	Extras []Extra
